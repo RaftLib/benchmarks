@@ -67,7 +67,7 @@ private:
     std::size_t curr_position = 0;
 };
 
-template < class chunktype > class compress : public raft::kernel
+template < class chunktype, class outputchunk > class compress : public raft::kernel
 {
 public:
     compress( const int blocksize,
@@ -78,7 +78,7 @@ public:
                                        workfactor( workfactor )
     {
         input.addPort< chunktype >( "in" );
-        output.addPort< chunktype >( "out" );
+        output.addPort< outputchunk >( "out" );
     }
 
     /** need a copy constructor for cloning **/
@@ -88,16 +88,18 @@ public:
                                         workfactor( other.workfactor )
     {
         input.addPort< chunktype >( "in" );
-        output.addPort< chunktype >( "out" );
+        output.addPort< outputchunk >( "out" );
     }
 
     virtual ~compress() = default;
 
     virtual raft::kstatus run()
     {
-        auto &in_ele( input[ "in" ].template peek< chunktype >() );
-        auto &out_ele(  output[ "out" ].template allocate< chunktype >() );
-        unsigned int length_out( chunktype::getChunkSize() );
+        auto &in_ele(   input[ "in" ].template peek< chunktype >()       );
+        auto &out_ele(  output[ "out" ].template allocate< outputchunk >() );
+        
+        unsigned int length_out( outputchunk::getChunkSize() );
+         
         const auto ret_val( BZ2_bzBuffToBuffCompress( out_ele.buffer,
                                       &length_out,
                                       in_ele.buffer,
@@ -107,7 +109,6 @@ public:
                                       workfactor ) );
         if( ret_val == BZ_OK )
         {
-
             out_ele.length = length_out;
             out_ele.index  = in_ele.index;
             output[ "out" ].send();
@@ -138,6 +139,7 @@ public:
                 case BZ_OUTBUFF_FULL:
                 {
                     std::cerr << "if the size of the compressed data exceeds *destLen\n";
+                    std::cerr << "length_out: " << length_out << "\n";
                 }
                 break;
                 default:
@@ -165,11 +167,14 @@ private:
 int
 main( int argc, char **argv )
 {
-    const static auto chunksize( 65536 );
+    const static auto chunksize( 1 << 16 );
+    const static auto chunksize2( 1 << 17 );
     using chunk_t = raft::filechunk< chunksize >;
+    using chunk2_t = raft::filechunk< chunksize2 >;
+
     using fr_t    = raft::filereader< chunk_t, false >;
-    using fw_t    = filewrite< chunk_t >;
-    using comp    = compress< chunk_t >;
+    using fw_t    = filewrite< chunk2_t >;
+    using comp    = compress< chunk_t, chunk2_t >;
 
     /** variables to set below **/
     bool help( false );
@@ -189,12 +194,15 @@ main( int argc, char **argv )
     cmdargs.addOption( new Option< bool >( help,
                                            "-h",
                                            "print this message" ) );
+    
     cmdargs.addOption( new Option< int >( blocksize,
                                           "-b",
                                           "set block size to 100k .. 900k" ) );
+    
     cmdargs.addOption( new Option< int >( workfactor,
                                           "-e",
                                           "effort" ) );
+    
     cmdargs.addOption( new Option< std::string >( inputfile,
                                                   "-i",
                                                   "input file",
