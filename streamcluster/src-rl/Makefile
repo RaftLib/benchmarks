@@ -6,7 +6,11 @@ TARGET=streamcluster
 OBJS=streamcluster.o
 
 ifdef version
-  ifeq "$(version)" "pthreads"
+##
+# TODO, add in RL flags as we add kernels to 
+# app
+##
+  ifeq "$(version)" "raftlib"
     CXXFLAGS :=	$(CXXFLAGS) -DENABLE_THREADS=1 -pthread
     OBJS += parsec_barrier.o
   endif

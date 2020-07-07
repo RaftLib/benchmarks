@@ -167,8 +167,8 @@ private:
 int
 main( int argc, char **argv )
 {
-    const static auto chunksize( 1 << 16 );
-    const static auto chunksize2( 1 << 17 );
+    const static auto chunksize( 1 << 12 );
+    const static auto chunksize2( 1 << 14  );
     using chunk_t = raft::filechunk< chunksize >;
     using chunk2_t = raft::filechunk< chunksize2 >;
 

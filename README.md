@@ -37,3 +37,16 @@ papers and information is available [here](https://parsec.cs.princeton.edu)
     in the RL case vs. coompute limited...but, maybe
     not a bad idea to add. 
 
+
+# Porting notes
+## M:N queue specifics 
+* For specifying M:1 queue behavior, use 
+the reduce kernel, the runtime can remove
+this one and insert a M:1 capable Queue
+* For 1:N queue behavior, use a split kernel
+which the runtime will remove and insert a
+1:N capable queue. 
+* For M:N behavior use a mux kernel which 
+takes M inputs, distributes them to N outputs. 
+The runtime will take this kernel and replace
+it with an M:N capable FIFO when available. 
