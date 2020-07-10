@@ -1,0 +1,5 @@
+mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
+current_dir := $(patsubst %/,%,$(dir $(mkfile_path)))
+
+PARSEC_LIB=$(current_dir)
+PARSEC_INC=$(current_dir)

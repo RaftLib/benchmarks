@@ -533,6 +533,7 @@ class Read: public raft::kernel
               //break;
             }
 #endif 
+        return( 0 );
         }
 
         virtual raft::kstatus run()

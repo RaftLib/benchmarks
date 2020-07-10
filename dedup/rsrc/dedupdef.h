@@ -7,13 +7,21 @@
 
 #include "config.h"
 #include "mbuffer.h"
-#include "sha.h"
+#include <openssl/sha.h>
 
+#define SHA1_LEN  20  
 
 #define CHECKBIT 123456
 
 #define MAX_THREADS 1024
 
+void SHA1_Digest(const void *data, size_t len, unsigned char *digest) {
+  SHA_CTX sha;
+
+  SHA1_Init(&sha);
+  SHA1_Update(&sha, data, len);
+  SHA1_Final(digest, &sha);
+}
 
 /*-----------------------------------------------------------------------*/
 /* type definition */
