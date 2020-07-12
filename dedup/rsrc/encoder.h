@@ -24,6 +24,19 @@
 #include "rabin.h"
 #include "mbuffer.h"
 
+
+#ifdef ENABLE_GZIP_COMPRESSION
+#include <zlib.h>
+#endif //ENABLE_GZIP_COMPRESSION
+//
+#ifdef ENABLE_BZIP2_COMPRESSION
+#include <bzlib.h>
+#endif //ENABLE_BZIP2_COMPRESSION
+//
+//#ifdef ENABLE_PTHREADS
+//#include <pthread.h>
+//#endif //ENABLE_PTHREADS
+
 void Encode(config_t * conf);
 
 
@@ -338,41 +351,6 @@ void sub_Compress(chunk_t *chunk) {
      return;
 }
 
-class Prod: public raft::parallel_k
-{
-    private: 
-        int num;
-
-    public:
-        Prod() : raft::parallel_k()
-        {
-            addPortTo<int>(output);
-            num = 0;
-        }
-
-        virtual ~Prod() = default;
-
-        virtual raft::kstatus run()
-        {
-            if(num < 10){
-                for (auto &port : output)
-                {
-                    auto &product( port.template allocate<int>() );
-                    product = num;
-                    port.send();
-                    num++;
-                }
-            }
-
-            else{
-                return (raft::stop);
-            }
-
-            return (raft::proceed);
-        }
-};
-
-
 /** Kernel **/
 
 class Read: public raft::kernel
@@ -394,7 +372,7 @@ class Read: public raft::kernel
             fd = Fdesc;
             bytes_left = 0;
             args = *Args;
-            output.addPort<int>("out");
+            output.addPort<chunk_t>("out");
 
             preloading_buffer_seek;
 
@@ -538,10 +516,13 @@ class Read: public raft::kernel
 
         virtual raft::kstatus run()
         {
-            int status = work();
+            //int status = work();
+            int status = 0;
             
-            auto c(output["out"].template allocate_s<int>());
-            *c = 5;
+            auto c(output["out"].template allocate_s<chunk_t>());
+            assert (chunk);
+            *c = *chunk;
+            printf("chunk : %d\n", *chunk);
             output["output"].send();
 
             if (status == -1)
@@ -553,25 +534,110 @@ class Read: public raft::kernel
 
 /** Kernel **/
 
-class Kernel: public raft::kernel
+class Write: public raft::kernel
 {
     private:
         int elm;
+        chunk_t *temp;
+        u32int * rabintab;
+        u32int * rabinwintab;
+        int fd_out;
     public:
-        Kernel() : raft::kernel()
+        Write(config_t * Conf, int Fdesc, struct thread_args * Args) : raft::kernel()
         {
-            input.addPort<int>("in");
+            input.addPort<chunk_t>("in");
+            rabintab = (u32int *)malloc(256*sizeof rabintab[0]);
+            rabinwintab = (u32int *)malloc(256*sizeof rabintab[0]);
+            if(rabintab == NULL || rabinwintab == NULL) {
+              EXIT_TRACE("Memory allocation failed.\n");
+            }
+            rf_win_dataprocess = 0;
+            rabininit(rf_win_dataprocess, rabintab, rabinwintab);
+            fd_out = Fdesc;
+        }
+
+        virtual void work(chunk_t * chunk){
+        
+            //partition input block into fine-granular chunks
+            int split, r;
+            do {
+              split = 0;
+              //Try to split the buffer
+              int offset = rabinseg((uchar *) chunk->uncompressed_data.ptr, chunk->uncompressed_data.n, rf_win_dataprocess, rabintab, rabinwintab);
+              //Did we find a split location?
+              if(offset == 0) {
+                //Split found at the very beginning of the buffer (should never happen due to technical limitations)
+                assert(0);
+                split = 0;
+              } else if(offset < chunk->uncompressed_data.n) {
+                //Split found somewhere in the middle of the buffer
+                //Allocate a new chunk and create a new memory buffer
+                temp = (chunk_t *)malloc(sizeof(chunk_t));
+                if(temp==NULL) EXIT_TRACE("Memory allocation failed.\n");
+
+                //split it into two pieces
+                r = mbuffer_split(&chunk->uncompressed_data, &temp->uncompressed_data, offset);
+                if(r!=0) EXIT_TRACE("Unable to split memory buffer.\n");
+                temp->header.state = CHUNK_STATE_UNCOMPRESSED;
+
+#ifdef ENABLE_STATISTICS
+                //update statistics
+                stats.nChunks[CHUNK_SIZE_TO_SLOT(chunk->uncompressed_data.n)]++;
+#endif //ENABLE_STATISTICS
+
+
+                //Deduplicate
+                int isDuplicate = sub_Deduplicate(chunk);
+#ifdef ENABLE_STATISTICS
+                if(isDuplicate) {
+                  stats.nDuplicates++;
+                } else {
+                  stats.total_dedup += chunk->uncompressed_data.n;
+                }
+#endif //ENABLE_STATISTICS
+
+                //If chunk is unique compress & archive it.
+                if(!isDuplicate) {
+                  sub_Compress(chunk);
+#ifdef ENABLE_STATISTICS
+                  stats.total_compressed += chunk->compressed_data.n;
+#endif //ENABLE_STATISTICS
+                }
+
+                write_chunk_to_file(fd_out, chunk);
+                if(chunk->header.isDuplicate){
+                  free(chunk);
+                  chunk=NULL;
+                }
+
+                //prepare for next iteration
+                chunk = temp;
+                temp = NULL;
+                split = 1;
+              } else {
+                //Due to technical limitations we can't distinguish the cases "no split" and "split at end of buffer"
+                //This will result in some unnecessary (and unlikely) work but yields the correct result eventually.
+                temp = chunk;
+                chunk = NULL;
+                split = 0;
+              }
+            } while(split);
         }
 
 
         virtual raft::kstatus run()
         {
             auto &in((this)->input["in"]);
-            auto &elm(in.template peek<int>());
-            printf ("Elm: %d\n", elm);
+            auto &elm(in.template peek<chunk_t>());
+            //assert (elm);
+            //printf ("Elm: %d\n", elm);
+            
+            if(&elm == NULL)
+               return (raft::stop); 
+
+            work(&elm);
             in.recycle(1);
             return(raft::proceed);
-            
         }
 };
 
@@ -584,6 +650,11 @@ void RaftPipeline(void * targs){
   //int r;
 
   Read Producer(conf, fd, args);
+  Write Consumer(conf, fd_out, args);
+    
+  raft::map m;
+  m += Producer >> Consumer;
+  m.exe();
 
 }
 
@@ -593,6 +664,9 @@ void *SerialIntegratedPipeline(void * targs) {
   int fd = args->fd;
   int fd_out = create_output_file(conf->outfile);
   int r;
+
+  RaftPipeline(targs);
+  return;
 
   chunk_t *temp = NULL;
   chunk_t *chunk = NULL;

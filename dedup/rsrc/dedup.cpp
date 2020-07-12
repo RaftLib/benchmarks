@@ -4,9 +4,6 @@
 #include <string>
 #include <cassert>
 #include <iostream>
-#include <raft>
-#include <raftio>
-#include <cmd>
 #include <type_traits>
 
 #include "util.h"
@@ -17,6 +14,9 @@
 #include "config.h"
 #include "queue.h"
 
+#include <raft>
+#include <raftio>
+#include <cmd>
 
 extern config_t * conf;
 
@@ -25,7 +25,77 @@ extern config_t * conf;
  * http://www.bzip.org/1.0.3/html/hl-interface.html
  */
 
+class Prod: public raft::parallel_k
+{
+    private: 
+        int num;
 
+    public:
+        Prod() : raft::parallel_k()
+        {
+            addPortTo<int>(output);
+            num = 0;
+        }
+
+        virtual ~Prod() = default;
+
+        virtual raft::kstatus run()
+        {
+            if(num < 10){
+                for (auto &port : output)
+                {
+                    auto &product( port.template allocate<int>() );
+                    product = num;
+                    port.send();
+                    num++;
+                }
+            }
+
+            else{
+                return (raft::stop);
+            }
+
+            return (raft::proceed);
+        }
+};
+
+/** Kernel **/
+
+class Kernel: public raft::kernel
+{
+    private:
+        int elm;
+    public:
+        Kernel() : raft::kernel()
+        {
+            input.addPort<int>("in");
+        }
+
+        virtual raft::kstatus run()
+        {
+            auto &in((this)->input["in"]);
+            auto &elm(in.template peek<int>());
+            printf ("Elm: %d\n", elm);
+            in.recycle(1);
+            return(raft::proceed);
+            
+        }
+};
+/*--------------------------------------------------------------------------*/
+static void
+usage(char* prog)
+{
+  printf("usage: %s [-cusfvh] [-w gzip/bzip2/none] [-i file] [-o file] [-t number_of_threads]\n",prog);
+  printf("-c \t\t\tcompress\n");
+  printf("-u \t\t\tuncompress\n");
+  printf("-p \t\t\tpreloading (for benchmarking purposes)\n");
+  printf("-w \t\t\tcompression type: gzip/bzip2/none\n");
+  printf("-i file\t\t\tthe input file\n");
+  printf("-o file\t\t\tthe output file\n");
+  printf("-t \t\t\tnumber of threads per stage \n");
+  printf("-v \t\t\tverbose output\n");
+  printf("-h \t\t\thelp\n");
+}
 
 int
 main( int argc, char **argv )
@@ -43,7 +113,8 @@ main( int argc, char **argv )
     }
 
     strcpy(conf->outfile, "");
-    conf->compress_type = COMPRESS_GZIP;
+    //conf->compress_type = COMPRESS_GZIP;
+    conf->compress_type = COMPRESS_BZIP2;
     conf->preloading = 0;
     conf->nthreads = 1;
     conf->verbose = 0;
@@ -54,7 +125,7 @@ main( int argc, char **argv )
     //opterr = 0;
     //optind = 1;
   
-    /*while (-1 != (ch = getopt(argc, argv, "cupvo:i:w:t:h"))) {
+    while (-1 != (ch = getopt(argc, argv, "cupvo:i:w:t:h"))) {
         switch (ch) {
         case 'c':
           compress = TRUE;
@@ -102,7 +173,7 @@ main( int argc, char **argv )
           usage(argv[0]);
           return -1;
         }
-  }*/
+  }
 
 #ifndef ENABLE_GZIP_COMPRESSION
  if (conf->compress_type == COMPRESS_GZIP){
@@ -132,8 +203,7 @@ main( int argc, char **argv )
         Decode(conf);
     }*/
 
-    free(conf);
-
+    //free(conf);
 
     Prod producer;
     Kernel kernel;
