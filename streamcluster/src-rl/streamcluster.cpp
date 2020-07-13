@@ -25,6 +25,8 @@
 #include <hooks.h>
 #endif
 
+#include "streamcluster.hpp"
+
 using namespace std;
 
 constexpr static std::uint16_t MAXNAMESIZE = 1024;
@@ -42,46 +44,11 @@ constexpr static std::uint8_t ITER  = 3;
 constexpr static std::uint8_t CACHE_LINE = 64;
 
 
-/* this structure represents a point */
-/* these will be passed around to avoid copying coordinates */
-struct Point 
-{
-  float     weight  = 1.0;
-  float     *coord  = nullptr;
-  long      assign  = 0;  /* number of point where this one is assigned */
-  float     cost    = 0.0;  /* cost of that assignment, weight*distance */
-};
-
-/* this is the array of points */
-struct Points 
-{
-    Points( long n, long d, std::size_t count ) : num( n ), dim( d )
-    {
-        p.reserve( count );
-    }
-
-    long  num; /* number of points; may not be N if this is a sample */
-    int   dim;  /* dimensionality */
-    std::vector< Point > p; /* the array itself */
-};
-
 static bool *switch_membership; //whether to switch membership in pgain
 static bool* is_center; //whether a point is a center
 static int* center_table; //index table of centers
 
 static int nproc; //# of threads
-
-/* compute Euclidean distance squared between two points */
-inline float dist( const Point &p1, const Point &p2, const int dim )
-{
-  float result=0.0;
-  for ( auto i( 0 ); i<dim; i++ )
-  {
-    result += ( p1.coord[i] - p2.coord[i] ) * ( p1.coord[i] - p2.coord[i] );
-  }
-  return(result);
-}
-
 
 /* shuffle points into random order */
 void shuffle(Points *points)
@@ -110,7 +77,7 @@ void intshuffle(int *intarray, int length)
 }
 
 
-
+// used in pkmedian
 float pspeedy(Points *points, float z, long *kcenter, int pid, pthread_barrier_t* barrier)
 {
 #ifdef ENABLE_THREADS
@@ -257,7 +224,7 @@ float pspeedy(Points *points, float z, long *kcenter, int pid, pthread_barrier_t
 
 
 
-
+// used in pFL
 double pgain(long x, Points *points, double z, long int *numcenters, int pid, pthread_barrier_t* barrier)
 {
   //  printf("pgain pthread %d begin\n",pid);
@@ -475,8 +442,8 @@ double pgain(long x, Points *points, double z, long int *numcenters, int pid, pt
 /* cost should represent this solution's cost */
 /* halt if there is < e improvement after iter calls to gain */
 /* feasible is an array of numfeasible points which may be centers */
-
- float pFL(Points *points, int *feasible, int numfeasible,
+// used in pkmedian
+float pFL(Points *points, int *feasible, int numfeasible,
 	  float z, long *k, double cost, long iter, float e, 
 	  int pid, pthread_barrier_t* barrier)
 {
@@ -514,11 +481,7 @@ double pgain(long x, Points *points, double z, long int *numcenters, int pid, pt
   return(cost);
 }
 
-#ifdef TBB_VERSION
-int selectfeasible_fast(Points *points, int **feasible, int kmin)
-#else
 int selectfeasible_fast(Points *points, int **feasible, int kmin, int pid, pthread_barrier_t* barrier)
-#endif
 {
   int numfeasible = points->num;
   if (numfeasible > (ITER*kmin*log((double)kmin)))
@@ -550,11 +513,7 @@ int selectfeasible_fast(Points *points, int **feasible, int kmin, int pid, pthre
       (*feasible)[i] = i;
     return numfeasible;
   }
-#ifdef TBB_VERSION
-  accumweight= (float*)memoryFloat.allocate(sizeof(float)*points->num);
-#else
   accumweight= (float*)malloc(sizeof(float)*points->num);
-#endif
 
   accumweight[0] = points->p[0].weight;
   totalweight=0;
@@ -584,11 +543,7 @@ int selectfeasible_fast(Points *points, int **feasible, int kmin, int pid, pthre
     (*feasible)[i]=r;
   }
 
-#ifdef TBB_VERSION
-  memoryFloat.deallocate(accumweight, sizeof(float));
-#else
   free(accumweight); 
-#endif
 
   return numfeasible;
 }
@@ -596,6 +551,7 @@ int selectfeasible_fast(Points *points, int **feasible, int kmin, int pid, pthre
 
 
 /* compute approximate kmedian on the points */
+// used in local search sub
 float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
 	       int pid, pthread_barrier_t* barrier )
 {
@@ -619,10 +575,6 @@ float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
   long k1 = bsize * pid;
   long k2 = k1 + bsize;
   if( pid == nproc-1 ) k2 = points->num;
-
-#ifdef ENABLE_THREADS
-//  pthread_barrier_wait(barrier);
-#endif
 
   double myhiz = 0;
   for (long kk=k1;kk < k2; kk++ ) 
@@ -794,16 +746,7 @@ void copycenters(Points *points, Points* centers, long* centerIDs, long offset)
   free(is_a_median);
 }
 
-struct pkmedian_arg_t
-{
-  Points* points;
-  long kmin;
-  long kmax;
-  long* kfinal;
-  int pid;
-  pthread_barrier_t* barrier;
-};
-
+// used in localSearch
 void* localSearchSub(void* arg_) {
 
   pkmedian_arg_t* arg= (pkmedian_arg_t*)arg_;
@@ -812,7 +755,7 @@ void* localSearchSub(void* arg_) {
   return NULL;
 }
 
-
+// used in streamCluster
 void localSearch( Points* points, long kmin, long kmax, long* kfinal ) {
     pthread_barrier_t barrier;
     pthread_t* threads = new pthread_t[nproc];
@@ -849,79 +792,6 @@ void localSearch( Points* points, long kmin, long kmax, long* kfinal ) {
 #endif
 }
 
-class PStream {
-public:
-  PStream() = default;
-  virtual ~PStream()    = default;
-  
-  virtual size_t read( float* dest, int dim, int num ) = 0;
-  virtual int ferror() = 0;
-  virtual int feof() = 0;
-};
-
-//synthetic stream
-class SimStream : public PStream 
-{
-public:
-  SimStream(long n_ ) : PStream(), n( n_ ) {};
-
-  size_t read( float* dest, int dim, int num ) 
-  {
-    size_t count = 0;
-    for( int i = 0; i < num && n > 0; i++ ) 
-    {
-      for( int k = 0; k < dim; k++ ) 
-      {
-	    dest[i*dim + k] = lrand48()/(float)INT_MAX;
-      }
-      n--;
-      count++;
-    }
-    return count;
-  }
-
-  virtual int ferror() 
-  {
-    return 0;
-  }
-  
-  virtual int feof() 
-  {
-    return n <= 0;
-  }
-
-private:
-  long n;
-};
-
-class FileStream : public PStream 
-{
-public:
-  FileStream( char* filename ) 
-  {
-    fp = fopen( filename, "rb");
-    if( fp == NULL ) {
-      fprintf(stderr,"error opening file %s\n.",filename);
-      exit(1);
-    }
-  }
-  size_t read( float* dest, int dim, int num ) {
-    return std::fread(dest, sizeof(float)*dim, num, fp); 
-  }
-  int ferror() {
-    return std::ferror(fp);
-  }
-  int feof() {
-    return std::feof(fp);
-  }
-  ~FileStream() {
-    fprintf(stderr,"closing file stream\n");
-    fclose(fp);
-  }
-private:
-  FILE* fp;
-};
-
 void outcenterIDs( Points* centers, long* centerIDs, char* outfile ) {
   FILE* fp = fopen(outfile, "w");
   if( fp==NULL ) {
@@ -946,15 +816,8 @@ void outcenterIDs( Points* centers, long* centerIDs, char* outfile ) {
   fclose(fp);
 }
 
-void streamCluster( PStream* stream, 
-		            long kmin, 
-                    long kmax, 
-                    int dim,
-		            long chunksize, 
-                    long centersize, 
-                    char* outfile )
+void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksize, long centersize, char* outfile)
 {
-
   float* block = (float*)malloc( chunksize*dim*sizeof(float) );
   float* centerBlock = (float*)malloc(centersize*dim*sizeof(float) );
   long* centerIDs = (long*)malloc(centersize*dim*sizeof(long));
@@ -1001,15 +864,9 @@ void streamCluster( PStream* stream,
       points.p[i].weight = 1.0;
     }
 
-#ifdef TBB_VERSION
-    switch_membership = (bool*)memoryBool.allocate(points.num*sizeof(bool), NULL);
-    is_center = (bool*)calloc(points.num,sizeof(bool));
-    center_table = (int*)memoryInt.allocate(points.num*sizeof(int));
-#else
     switch_membership = (bool*)malloc(points.num*sizeof(bool));
     is_center = (bool*)calloc(points.num,sizeof(bool));
     center_table = (int*)malloc(points.num*sizeof(int));
-#endif
 
 
     //fprintf(stderr,"center_table = 0x%08x\n",(int)center_table);
@@ -1028,15 +885,9 @@ void streamCluster( PStream* stream,
     copycenters(&points, &centers, centerIDs, IDoffset); /* sequential */
     IDoffset += numRead;
 
-#ifdef TBB_VERSION
-    memoryBool.deallocate(switch_membership, sizeof(bool));
-    free(is_center);
-    memoryInt.deallocate(center_table, sizeof(int));
-#else
     free(is_center);
     free(switch_membership);
     free(center_table);
-#endif
 
     if( stream->feof() ) {
       break;
@@ -1044,15 +895,9 @@ void streamCluster( PStream* stream,
   }
 
   //finally cluster all temp centers
-#ifdef TBB_VERSION
-  switch_membership = (bool*)memoryBool.allocate(centers.num*sizeof(bool));
-  is_center = (bool*)calloc(centers.num,sizeof(bool));
-  center_table = (int*)memoryInt.allocate(centers.num*sizeof(int));
-#else
   switch_membership = (bool*)malloc(centers.num*sizeof(bool));
   is_center = (bool*)calloc(centers.num,sizeof(bool));
   center_table = (int*)malloc(centers.num*sizeof(int));
-#endif
 
   localSearch( &centers, kmin, kmax ,&kfinal ); // parallel
   contcenters(&centers);
@@ -1065,19 +910,6 @@ int main(int argc, char **argv)
   char *infilename = new char[MAXNAMESIZE];
   long kmin, kmax, n, chunksize, clustersize;
   int dim;
-
-#ifdef PARSEC_VERSION
-#define __PARSEC_STRING(x) #x
-#define __PARSEC_XSTRING(x) __PARSEC_STRING(x)
-        fprintf(stderr,"PARSEC Benchmark Suite Version "__PARSEC_XSTRING(PARSEC_VERSION)"\n");
-	fflush(NULL);
-#else
-        fprintf(stderr,"PARSEC Benchmark Suite\n");
-	fflush(NULL);
-#endif //PARSEC_VERSION
-#ifdef ENABLE_PARSEC_HOOKS
-  __parsec_bench_begin(__parsec_streamcluster);
-#endif
 
   if (argc<10) {
     fprintf(stderr,"usage: %s k1 k2 d n chunksize clustersize infile outfile nproc\n",
@@ -1109,12 +941,6 @@ int main(int argc, char **argv)
   nproc = atoi(argv[9]);
 
 
-#ifdef TBB_VERSION
-  fprintf(stderr,"TBB version. Number of divisions: %d\n",NUM_DIVISIONS);
-  tbb::task_scheduler_init init(nproc);
-#endif
-
-
   srand48(SEED);
   PStream* stream;
   if( n > 0 ) {
@@ -1125,21 +951,9 @@ int main(int argc, char **argv)
   }
 
 
-#ifdef ENABLE_PARSEC_HOOKS
-  __parsec_roi_begin();
-#endif
-
   streamCluster(stream, kmin, kmax, dim, chunksize, clustersize, outfilename );
 
-#ifdef ENABLE_PARSEC_HOOKS
-  __parsec_roi_end();
-#endif
-
   delete stream;
-
-#ifdef ENABLE_PARSEC_HOOKS
-  __parsec_bench_end();
-#endif
   
   return 0;
 }
