@@ -103,11 +103,28 @@ struct PKMedianPt2_Output
   unsigned int pointsIndex;
   unsigned int id;
   bool* openCenters;
+  double z;
   bool skip;
 
   
-  PKMedianPt2_Output(size_t numRead, size_t offset, size_t blockSize, unsigned int pointsIndex, unsigned int id, bool* openCenters, bool skip = false) 
-    : numRead(numRead), offset(offset), blockSize(blockSize), pointsIndex(pointsIndex), id(id), openCenters(openCenters), skip(skip) {}
+  PKMedianPt2_Output(size_t numRead, size_t offset, size_t blockSize, unsigned int pointsIndex, unsigned int id, bool* openCenters, double z, bool skip = false) 
+    : numRead(numRead), offset(offset), blockSize(blockSize), pointsIndex(pointsIndex), id(id), openCenters(openCenters), skip(skip), z(z) {}
+};
+
+struct PSpeedyKernel_Output
+{
+  size_t numRead;
+  size_t offset;
+  size_t blockSize;
+  unsigned int pointsIndex;
+  bool* openCenters;
+  double z;
+  double cost;
+  bool skip;
+
+  
+  PSpeedyKernel_Output(size_t numRead, size_t offset, size_t blockSize, unsigned int pointsIndex, bool* openCenters, double z, double cost, bool skip = false) 
+    : numRead(numRead), offset(offset), blockSize(blockSize), pointsIndex(pointsIndex), openCenters(openCenters), z(z), cost(cost), skip(skip) {}
 };
 
 class PStream {
@@ -326,9 +343,10 @@ class PKMedianPt2 : public raft::kernel_all
 private:
   Points* m_Points;
   unsigned int m_ThreadCount;
+  size_t* m_kCenters;
 public:
-  PKMedianPt2(Points* points, unsigned int threadCount)
-    : raft::kernel_all(), m_Points(points), m_ThreadCount(threadCount)
+  PKMedianPt2(Points* points, size_t* kCenters, unsigned int threadCount)
+    : raft::kernel_all(), m_Points(points), m_kCenters(kCenters), m_ThreadCount(threadCount)
   {
     char buffer[128];
 
@@ -372,7 +390,7 @@ public:
     {
       unsigned int i = 0;
       for (auto &port : output)
-        port.push<PKMedianPt2_Output>(PKMedianPt2_Output(numRead, offset, blockSize, pointsIndex, i++, nullptr, true));
+        port.push<PKMedianPt2_Output>(PKMedianPt2_Output(numRead, offset, blockSize, pointsIndex, i++, nullptr, 0.0, true));
 
       return raft::proceed;
     }
@@ -385,14 +403,122 @@ public:
     double z = hiz / 2.0;
 
     for (auto i = 0; i < numRead; i++)
+    {
       openCenters[i] = ((float) lrand48() / (float) INT_MAX) < (m_Points[pointsIndex].p[i].cost / z);
+      if (openCenters[i])
+        m_kCenters[pointsIndex]++;
+    }
+      
 
     // Create and push our output data
     unsigned int i = 0;
     for (auto &port : output)
-      port.push<PKMedianPt2_Output>(PKMedianPt2_Output(numRead, offset, blockSize, pointsIndex, i++, openCenters));
+      port.push<PKMedianPt2_Output>(PKMedianPt2_Output(numRead, offset, blockSize, pointsIndex, i++, openCenters, z));
 
     return raft::proceed;
+  }
+};
+
+class PSpeedyKernel : public raft::kernel
+{
+private:
+  Points* m_Points;
+public:
+  PSpeedyKernel(Points* points) 
+    : raft::kernel(), m_Points(points)
+  {
+    input.addPort<PKMedianPt2_Output>("in");
+    output.addPort<PSpeedyKernel_Output>("out");
+  }
+
+  virtual raft::kstatus run()
+  {
+    PKMedianPt2_Output inputData = input["in"].peek<PKMedianPt2_Output>();
+    if (inputData.skip)
+    {
+      output["out"].push<PSpeedyKernel_Output>(PSpeedyKernel_Output(inputData.numRead, inputData.offset, inputData.blockSize, inputData.pointsIndex, inputData.openCenters, 0.0, 0.0, true));
+      input["in"].recycle();
+      return raft::proceed;
+    }
+
+    double cost = 0.0;
+
+    // Calculate bounds for iteration
+    size_t k1 = inputData.blockSize * inputData.id;
+    size_t k2 = k1 + inputData.blockSize;
+    if (k2 > inputData.numRead) k2 = inputData.numRead;
+
+    unsigned int pointsIndex = inputData.pointsIndex;
+
+    for (auto i = k1; i < k2; i++)
+    {
+      if (inputData.openCenters[i])
+      {
+        float distance = dist(m_Points[pointsIndex].p[i], m_Points[pointsIndex].p[0], m_Points->dim);
+        m_Points[pointsIndex].p[i].cost = distance * m_Points[pointsIndex].p[i].weight;
+        m_Points[pointsIndex].p[i].assign = i;
+      }
+    }
+
+    for (auto i = k1; i < k2; i++)
+      cost += m_Points[pointsIndex].p[i].cost;
+
+    output["out"].push<PSpeedyKernel_Output>(PSpeedyKernel_Output(inputData.numRead, inputData.offset, inputData.blockSize, inputData.pointsIndex, inputData.openCenters, inputData.z, cost));
+
+    input["in"].recycle();
+
+    return raft::proceed;
+
+  }
+};
+
+class PSpeedySum : public raft::kernel_all
+{
+private:
+  Points* m_Points;
+  unsigned int m_ThreadCount;
+  size_t* m_kCenters;
+public:
+  PSpeedySum(Points* m_Points, unsigned int threadCount, size_t* kCenters)
+    : raft::kernel_all(), m_ThreadCount(threadCount), m_kCenters(kCenters)
+  {
+    char buffer[128];
+
+    // Create our input ports based on the number of desired threads
+    for (auto i = 0; i < m_ThreadCount; i++)
+    {
+      sprintf(buffer, "in%u", i);
+      input.addPort<LocalSearchStarter_Output>(buffer);
+    }
+  }
+
+  virtual raft::kstatus run()
+  {
+    // Save the input data so we can recycle after reading once
+    double cost = 0.0;
+    unsigned int pointsIndex = 0;
+    size_t numRead = 0;
+    size_t offset = 0;
+    size_t blockSize = 0;
+    double z = 0.0;
+    bool skip = false;
+
+    for (auto &port : input)
+    {
+      // Read the input data
+      PSpeedyKernel_Output inputData = port.peek<PSpeedyKernel_Output>();
+      pointsIndex = inputData.pointsIndex;
+      numRead = inputData.numRead;
+      offset = inputData.offset;
+      blockSize = inputData.blockSize;
+      z = inputData.z;
+      if (inputData.skip)
+        skip = true; 
+      cost += inputData.cost;
+      port.recycle();
+    }
+
+    cost += z * m_kCenters[pointsIndex];
   }
 };
 
