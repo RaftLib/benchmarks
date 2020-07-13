@@ -612,7 +612,7 @@ float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
     return cost;
   }
 
-  // pkmedian part 2 end, part 3 start
+  // pkmedian part 2 end
 
   if( pid == 0 ) shuffle(points);
   cost = pspeedy(points, z, &k, pid, barrier);

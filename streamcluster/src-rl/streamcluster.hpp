@@ -13,6 +13,20 @@
 #include <climits>
 #include <raft>
 
+/* compute Euclidean distance squared between two points */
+inline float dist( const Point &p1, const Point &p2, const int dim )
+{
+  float result=0.0;
+  for ( auto i( 0 ); i<dim; i++ )
+  {
+    result += ( p1.coord[i] - p2.coord[i] ) * ( p1.coord[i] - p2.coord[i] );
+  }
+  return(result);
+}
+
+void shuffle(Points*);
+
+
 /* this structure represents a point */
 /* these will be passed around to avoid copying coordinates */
 struct Point 
@@ -158,7 +172,7 @@ public:
     for (auto i = 0; i < centerSize; i++)
       m_Centers->p[i].coord = &m_CenterBlock[i * dim];
 
-    output.addPort<PStreamReader_Output*>("out");
+    output.addPort<PStreamReader_Output>("out");
   }
 
   ~PStreamReader()
@@ -178,7 +192,7 @@ public:
       exit(EXIT_FAILURE);
     }
 
-    PStreamReader_Output* outputData = new PStreamReader_Output(numRead, m_Offset); // needs to be deleted elsewhere
+    PStreamReader_Output outputData(numRead, m_Offset);
 
     output["out"].push(outputData);
     m_Offset += numRead;
@@ -190,15 +204,71 @@ public:
   }
 };
 
-/* compute Euclidean distance squared between two points */
-inline float dist( const Point &p1, const Point &p2, const int dim )
+class PKMedianPt1 : public raft::kernel
 {
-  float result=0.0;
-  for ( auto i( 0 ); i<dim; i++ )
+private:
+  Points* m_Points;
+
+public:
+  PKMedianPt1(Points* points) : raft::kernel(), m_Points(points)
   {
-    result += ( p1.coord[i] - p2.coord[i] ) * ( p1.coord[i] - p2.coord[i] );
+    input.addPort<PStreamReader_Output>("in");
+    output.addPort<double>("out");
+    output.addPort<PStreamReader_Output>("stream_output");
   }
-  return(result);
-}
+
+  virtual raft::kstatus run()
+  {
+    PStreamReader_Output inputData = input["in"].peek<PStreamReader_Output>();
+    double myHiz = 0.0;
+    for (auto k = 0; k < inputData.numRead; k++)
+      myHiz += dist(m_Points->p[k], m_Points->p[0], m_Points->dim) * m_Points->p[k].weight;
+    output["out"].push<double>(myHiz);
+    output["stream_output"].push<PStreamReader_Output>(inputData);
+    input["in"].recycle();
+    return raft::proceed;
+  }
+};
+
+class PKMedianPt2 : public raft::kernel
+{
+private:
+  Points* m_Points;
+  size_t m_kMax;
+  double m_Cost;
+  size_t* m_kFinal;
+public:
+  PKMedianPt2(Points* points, size_t kmax, size_t* kfinal) : raft::kernel(), m_Points(points), m_kMax(kmax), m_Cost(0.0), m_kFinal(kfinal)
+  {
+    input.addPort<double>("in");
+    input.addPort<PStreamReader_Output>("stream_input");
+    output.addPort<double>("out");
+  }
+
+  virtual raft::kstatus run()
+  {
+    double z = input["in"].peek<double>() / 2.0;
+    PStreamReader_Output inputData = input["stream_input"].peek<PStreamReader_Output>();
+    
+    if (inputData.numRead <= m_kMax)
+    {
+      for (auto k = 0; k < inputData.numRead; k++)
+      {
+        m_Points->p[k].assign = k;
+        m_Points->p[k].cost = 0;
+      }
+      m_Cost = 0.0;
+      *m_kFinal = 0.0;
+      output["out"].push<double>(m_Cost);
+      input["in"].recycle();
+      input["stream_input"].recycle();
+      return raft::proceed;
+    }
+
+    shuffle(m_Points);
+
+  }
+};
+
 
 #endif
