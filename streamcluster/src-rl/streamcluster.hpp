@@ -11,6 +11,7 @@
 #include <math.h>
 #include <sys/resource.h>
 #include <climits>
+#include <raft>
 
 /* this structure represents a point */
 /* these will be passed around to avoid copying coordinates */
@@ -43,6 +44,14 @@ struct pkmedian_arg_t
   long* kfinal;
   int pid;
   pthread_barrier_t* barrier;
+};
+
+struct PStreamReader_Output
+{
+  size_t numRead;
+  size_t offset;
+
+  PStreamReader_Output(size_t numRead, size_t offset) : numRead(numRead), offset(offset) {}
 };
 
 class PStream {
@@ -110,6 +119,75 @@ public:
   }
 private:
   FILE* fp;
+};
+
+class PStreamReader : public raft::kernel
+{
+private:
+  PStream* m_Stream;
+  int m_Dim;
+  long m_ChunkSize;
+  long m_CenterSize;
+  float* m_Block;
+  float* m_CenterBlock;
+  Points* m_Points;
+  Points* m_Centers;
+  size_t m_Offset;
+public:
+  PStreamReader(PStream* stream, int dim, long chunkSize, long centerSize) : raft::kernel()
+  {
+    m_Stream = stream;
+    m_Dim = dim;
+    m_ChunkSize = chunkSize;
+    m_CenterSize = centerSize;
+    m_Block = (float*) malloc(chunkSize * dim * sizeof(float));
+    m_CenterBlock = (float*) malloc(centerSize * dim * sizeof(float));
+    m_Offset = 0;
+
+    if (m_Block == nullptr)
+    {
+      std::cerr << "Not enough memory for a chunk!" << std::endl;
+      exit(EXIT_FAILURE);
+    }
+
+    m_Points = new Points(chunkSize, dim, chunkSize);
+    for (auto i = 0; i < chunkSize; i++)
+      m_Points->p[i].coord = &m_Block[i * dim];
+
+    m_Centers = new Points(0, dim, centerSize);
+    for (auto i = 0; i < centerSize; i++)
+      m_Centers->p[i].coord = &m_CenterBlock[i * dim];
+
+    output.addPort<PStreamReader_Output*>("out");
+  }
+
+  ~PStreamReader()
+  {
+    free(m_Block);
+    free(m_CenterBlock);
+    delete m_Points;
+    delete m_Centers;
+  }
+
+  virtual raft::kstatus run()
+  {
+    size_t numRead = m_Stream->read(m_Block, m_Dim, m_ChunkSize);
+    if (m_Stream->ferror() || numRead < (unsigned int) m_ChunkSize && !m_Stream->feof())
+    {
+      std::cerr << "Error reading data!" << std::endl;
+      exit(EXIT_FAILURE);
+    }
+
+    PStreamReader_Output* outputData = new PStreamReader_Output(numRead, m_Offset); // needs to be deleted elsewhere
+
+    output["out"].push(outputData);
+    m_Offset += numRead;
+
+    if (m_Stream->feof())
+      return(raft::stop);
+
+    return(raft::proceed);
+  }
 };
 
 /* compute Euclidean distance squared between two points */

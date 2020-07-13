@@ -16,6 +16,7 @@
 #include <sys/resource.h>
 #include <climits>
 #include <vector>
+#include <raft>
 #ifdef ENABLE_THREADS
 #include <pthread.h>
 #include "parsec_barrier.hpp"
@@ -555,6 +556,7 @@ int selectfeasible_fast(Points *points, int **feasible, int kmin, int pid, pthre
 float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
 	       int pid, pthread_barrier_t* barrier )
 {
+  // pkmedian part 1 start
   int i;
   double cost;
   double lastcost;
@@ -584,6 +586,8 @@ float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
 
   hizs[pid] = myhiz;
 
+  // pkmedian part 1 end, part 2 start
+
 #ifdef ENABLE_THREADS  
   pthread_barrier_wait(barrier);
 #endif
@@ -607,6 +611,8 @@ float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
     }
     return cost;
   }
+
+  // pkmedian part 2 end, part 3 start
 
   if( pid == 0 ) shuffle(points);
   cost = pspeedy(points, z, &k, pid, barrier);
@@ -815,6 +821,9 @@ void outcenterIDs( Points* centers, long* centerIDs, char* outfile ) {
   }
   fclose(fp);
 }
+
+
+
 
 void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksize, long centersize, char* outfile)
 {
