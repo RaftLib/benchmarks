@@ -17,6 +17,10 @@
 #include <climits>
 #include <vector>
 #include <raft>
+#include <raftio>
+#include <limits>
+
+
 #ifdef ENABLE_THREADS
 #include <pthread.h>
 #include "parsec_barrier.hpp"
@@ -27,8 +31,7 @@
 #endif
 
 #include "streamcluster.hpp"
-
-using namespace std;
+#define USE_RAFT
 
 constexpr static std::uint16_t MAXNAMESIZE = 1024;
 constexpr static std::uint8_t  SEED = 1;
@@ -811,7 +814,7 @@ void outcenterIDs( Points* centers, long* centerIDs, char* outfile ) {
 
   for( int i = 0; i < centers->num; i++ ) {
     if( is_a_median[i] ) {
-      fprintf(fp, "%u\n", centerIDs[i]);
+      fprintf(fp, "%lu\n", centerIDs[i]);
       fprintf(fp, "%lf\n", centers->p[i].weight);
       for( int k = 0; k < centers->dim; k++ ) {
 	fprintf(fp, "%lf ", centers->p[i].coord[k]);
@@ -824,9 +827,10 @@ void outcenterIDs( Points* centers, long* centerIDs, char* outfile ) {
 
 
 
-
+#ifndef USE_RAFT 
 void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksize, long centersize, char* outfile)
 {
+  
   float* block = (float*)malloc( chunksize*dim*sizeof(float) );
   float* centerBlock = (float*)malloc(centersize*dim*sizeof(float) );
   long* centerIDs = (long*)malloc(centersize*dim*sizeof(long));
@@ -911,6 +915,120 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
   localSearch( &centers, kmin, kmax ,&kfinal ); // parallel
   contcenters(&centers);
   outcenterIDs( &centers, centerIDs, outfile);
+#else
+void streamCluster(PStream* stream, size_t fileSize, long kmin, long kmax, int dim, long chunksize, long centersize, char* outfile)
+{
+  // The stream will not be read for more iterations than this amount
+  std::uintmax_t numOfIterations = fileSize / (chunksize * dim * sizeof(float)) + 1;
+
+  // Create our data structures
+  float** blocks = new float*[numOfIterations];
+  float** centerBlocks = new float*[numOfIterations];
+  long** centerIDs = new long*[numOfIterations];
+
+  for (auto i = 0; i < numOfIterations; i++)
+  {
+    blocks[i] = new float[chunksize * dim];
+    centerBlocks[i] = new float[centersize * dim];
+    centerIDs[i] = new long[centersize * dim];
+  }
+
+  Points** points = new Points*[numOfIterations];
+  Points** centers = new Points*[numOfIterations];
+
+  for (auto i = 0; i < numOfIterations; i++)
+  {
+    points[i] = new Points(chunksize, dim, chunksize);
+    for (auto j = 0; j < chunksize; j++)
+      points[i]->p[j].coord = &(blocks[i][j * dim]);
+
+    centers[i] = new Points(0, dim, centersize);
+    for (auto j = 0; j < centersize; j++)
+      centers[i]->p[j].coord = &(centerBlocks[i][j * dim]);
+  }
+
+  size_t* kCenters = new size_t[numOfIterations];
+  size_t* kFinals = new size_t[numOfIterations];
+
+  // The complete execution streamCluster is divided into multiple parts due to uncertain exit conditions on loops
+  PSpeedySum_Output* firstOutputs = new PSpeedySum_Output[numOfIterations];
+
+  // First Part Kernels
+  PStreamReader* streamReader = new PStreamReader(stream, blocks, dim, chunksize);
+  LocalSearchStarter* localSearchStarter = new LocalSearchStarter(points, nproc);
+  PKMedianPt1** pkMedianPt1s = new PKMedianPt1*[nproc];
+  PKMedianPt2* pkMedianPt2 = new PKMedianPt2(points, kCenters, nproc);
+  PSpeedyKernel** pSpeedyKernels = new PSpeedyKernel*[nproc];
+  PSpeedySum* pSpeedySum = new PSpeedySum(points, firstOutputs, nproc, kCenters);
+
+  for (auto i = 0; i < nproc; i++)
+  {
+    pkMedianPt1s[i] = new PKMedianPt1(points, kCenters, kmax, kFinals);
+    pSpeedyKernels[i] = new PSpeedyKernel(points);
+  }
+
+  raft::map partOneMap;
+  partOneMap += *streamReader >> *localSearchStarter;
+  for (auto i = 0; i < nproc; i++)
+  {
+    char buffer0[128]; // out0, out1, out2, etc...
+    char buffer1[128]; // in0, in1, in2, etc...
+    sprintf(buffer0, "out%d", i);
+    sprintf(buffer1, "in%d", i);
+    
+    // localSearchStarter "spawns" nproc threads
+    partOneMap += (*localSearchStarter)[buffer0] >> *(pkMedianPt1s[i]);
+
+    // pkMedianPt2 "joins" nproc threads
+    partOneMap += *(pkMedianPt1s[i]) >> (*pkMedianPt2)[buffer1];
+
+    // pkMedianPt2 "spawns" nproc threads
+    partOneMap += (*pkMedianPt2)[buffer0] >> *(pSpeedyKernels[i]);
+
+    // pSpeedySum "joins" nproc threads
+    partOneMap += *(pSpeedyKernels[i]) >> (*pSpeedySum)[buffer1];
+  }
+    
+
+  //partOneMap.exe();
+
+  // Cleanup
+  delete streamReader;
+  delete localSearchStarter;
+  delete pkMedianPt2;
+  delete pSpeedySum;
+  for (auto i = 0; i < nproc; i++)
+  {
+    delete pkMedianPt1s[i];
+    delete pSpeedyKernels[i];
+  }
+  delete[] pkMedianPt1s;
+  delete[] pSpeedyKernels;
+
+  delete[] kCenters;
+  delete[] kFinals;
+
+  for (auto i = 0; i < numOfIterations; i++)
+  {
+    delete points[i];
+    delete centers[i];
+  }
+
+  delete[] points;
+  delete[] centers;
+
+  for (auto i = 0; i < numOfIterations; i++)
+  {
+    delete[] blocks[i];
+    delete[] centerBlocks[i];
+    delete[] centerIDs[i];
+  }
+
+  delete[] blocks;
+  delete[] centerBlocks;
+  delete[] centerIDs;
+
+#endif
 }
 
 int main(int argc, char **argv)
@@ -959,8 +1077,26 @@ int main(int argc, char **argv)
     stream = new FileStream(infilename);
   }
 
-
+#ifndef USE_RAFT
   streamCluster(stream, kmin, kmax, dim, chunksize, clustersize, outfilename );
+#else
+  if (n > 0)
+  {
+    streamCluster(stream, n * dim * sizeof(float), kmin, kmax, dim, chunksize, clustersize, outfilename);
+  }
+  else
+  {
+    //std::uintmax_t size = std::filesystem::file_size(infilename);
+    std::ifstream file; 
+    file.open(infilename, std::iostream::in|std::iostream::binary);
+    file.ignore(std::numeric_limits<std::streamsize>::max());
+    std::streamsize length = file.gcount();
+    file.clear();
+    //file.seekg(0, std::iostream::beg);
+    streamCluster(stream, (size_t) length, kmin, kmax, dim, chunksize, clustersize, outfilename);
+  }
+
+#endif
 
   delete stream;
   
