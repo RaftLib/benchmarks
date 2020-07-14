@@ -918,6 +918,8 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
 #else
 void streamCluster(PStream* stream, size_t fileSize, long kmin, long kmax, int dim, long chunksize, long centersize, char* outfile)
 {
+  
+
   // The stream will not be read for more iterations than this amount
   std::uintmax_t numOfIterations = fileSize / (chunksize * dim * sizeof(float)) + 1;
 

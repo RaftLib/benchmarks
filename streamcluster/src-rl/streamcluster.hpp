@@ -369,9 +369,11 @@ private:
   Points** m_Points;
   unsigned int m_ThreadCount;
   size_t* m_kCenters;
+  size_t m_kMin;
+  unsigned int m_SP;
 public:
-  PKMedianPt2(Points** points, size_t* kCenters, unsigned int threadCount)
-    : raft::kernel_all(), m_Points(points), m_kCenters(kCenters), m_ThreadCount(threadCount)
+  PKMedianPt2(Points** points, size_t* kCenters, unsigned int threadCount, size_t kMin unsigned int SP)
+    : raft::kernel_all(), m_Points(points), m_kCenters(kCenters), m_ThreadCount(threadCount), m_kMin(kMin), m_SP(SP)
   {
     char buffer[128];
 
@@ -424,16 +426,39 @@ public:
     shuffle(m_Points[pointsIndex]);
 
     // Choose which centers will be opened
+    // TODO: Not convinced that this will work because the costs are modified between iterations...
+    // Temp / maybe permanent fix: perform the cost change operation for the singular point here, and 
+    // mark the ones for the next kernel to skip...
+
+    // I don't think this method can work realistically, because the points have to be updated every iteration
+    // when a center is chosen, master would end up doing all of the work
+
     bool* openCenters = new bool[numRead];
+    
     double z = hiz / 2.0;
 
-    for (auto i = 0; i < numRead; i++)
+    for (auto i = 1; i < numRead; i++)
     {
-      openCenters[i] = ((float) lrand48() / (float) INT_MAX) < (m_Points[pointsIndex]->p[i].cost / z);
-      if (openCenters[i])
+      if (((float) lrand48() / (float) INT_MAX) < (m_Points[pointsIndex]->p[i].cost / z))
+      {
+        openCenters[i] = 1;
         m_kCenters[pointsIndex]++;
-    }
-      
+
+        // Perform cost change update for the point here, mark it for skip as well
+        float distance = dist(m_Points[pointsIndex]->p[i], m_Points[pointsIndex]->p[0], m_Points[pointsIndex]->dim);
+        if (distance * m_Points[pointsIndex]->p[i].weight < m_Points[pointsIndex]->p[i].weight)
+        {
+          m_Points[pointsIndex]->p[i].cost = distance * m_Points[pointsIndex]->p[i].weight;
+          m_Points[pointsIndex]->p[i].assign = i;
+        }
+
+        // In order to mark a point for a skip, we need to record the iteration 
+
+
+      }
+      else 
+        openCenters[i] = 0;
+    }   
 
     // Create and push our output data
     unsigned int i = 0;
@@ -448,9 +473,11 @@ class PSpeedyKernel : public raft::kernel
 {
 private:
   Points** m_Points;
+  unsigned int m_Iterations;
+  unsigned int m_SP;
 public:
-  PSpeedyKernel(Points** points) 
-    : raft::kernel(), m_Points(points)
+  PSpeedyKernel(Points** points, unsigned int SP) 
+    : raft::kernel(), m_Points(points), m_Iterations(0), m_SP(SP)
   {
     input.addPort<PKMedianPt2_Output>("in");
     output.addPort<PSpeedyKernel_Output>("out");
@@ -475,13 +502,29 @@ public:
 
     unsigned int pointsIndex = inputData.pointsIndex;
 
-    for (auto i = k1; i < k2; i++)
+    // Create center at first point, send it to itself
+    for (auto k = k1; k < k2; k++)
+    {
+      float distance = dist(m_Points[pointsIndex]->p[k], m_Points[pointsIndex]->p[0], m_Points[pointsIndex]->dim);
+      m_Points[pointsIndex]->p[k].cost = distance * m_Points[pointsIndex]->p[k].weight;
+      m_Points[pointsIndex]->p[k].assign = 0;
+    }
+
+    // If a center was opened on this iteration, update the weights if necessary
+    for (auto i = 1; i < inputData.numRead; i++)
     {
       if (inputData.openCenters[i])
       {
-        float distance = dist(m_Points[pointsIndex]->p[i], m_Points[pointsIndex]->p[0], m_Points[pointsIndex]->dim);
-        m_Points[pointsIndex]->p[i].cost = distance * m_Points[pointsIndex]->p[i].weight;
-        m_Points[pointsIndex]->p[i].assign = i;
+        for (auto k = k1; k < k2; k++)
+        {
+          float distance = dist(m_Points[pointsIndex]->p[k], m_Points[pointsIndex]->p[0], m_Points[pointsIndex]->dim);
+          if (distance * m_Points[pointsIndex]->p[k].weight < m_Points[pointsIndex]->p[k].weight)
+          {
+            m_Points[pointsIndex]->p[k].cost = distance * m_Points[pointsIndex]->p[k].weight;
+            m_Points[pointsIndex]->p[k].assign = i;
+          }
+        }
+
       }
     }
 
