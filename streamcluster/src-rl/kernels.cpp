@@ -115,7 +115,7 @@ raft::kstatus PSpeedyCallManager::run()
                 input[std::to_string(i).c_str()].recycle();
 
             // Push our output
-            output["cost"].push<PSpeedyCallManager_Output>(PSpeedyCallManager_Output(m_Points, m_NumRead, m_Z, m_kCenter, totalCost));
+            output["cost"].push<PSpeedyCallManager_Output>(PSpeedyCallManager_Output(m_Points, m_NumRead, m_Z, m_kCenter, totalCost, m_Hiz, m_Loz));
             
             return raft::stop;
         }
@@ -250,6 +250,8 @@ raft::kstatus SelectFeasible_FastKernel::run()
     // Will also perform the is_center assignments
     for (auto i = 0; i < inputData.numRead; i++)
         m_IsCenter[m_Points->p[i].assign] = true;
+
+    output["output"].push<SelectFeasible_FastKernel_Output>(SelectFeasible_FastKernel_Output(m_Points, inputData.numRead, inputData.z, inputData.kCenter, inputData.cost, inputData.hiz, inputData.loz, numfeasible, *m_Feasible));
 
     
 
@@ -760,6 +762,94 @@ raft::kstatus PFLCallManager::run()
         return raft::proceed;
     }
 
+    return raft::proceed;
+}
+
+PKMedianPt3::PKMedianPt3(long kmin, long kmax, long* kfinal, unsigned int ITER)
+    : raft::kernel(), m_kMin(kmin), m_kMax(kmax), m_ITER(ITER), m_kFinal(kfinal)
+{
+    // This is the entry point to this kernel from selectfeasible_fast
+    input.addPort<SelectFeasible_FastKernel_Output>("input_main");
+
+    // This is the input from the pFL calls
+    input.addPort<double>("input_pfl");
+
+    // This is the output to a pFL call
+    output.addPort<PFLCallManager_Input>("output_pfl");
+
+    // This is the cost output of pkMedian
+    output.addPort<double>("output_cost");
+}
+
+raft::kstatus PKMedianPt3::run()
+{
+    if (input["input_main"].size() > 0)
+    {
+        // This is the entry in PKMedianPt3
+        SelectFeasible_FastKernel_Output inputData = input["input_main"].peek<SelectFeasible_FastKernel_Output>();
+        m_Points = inputData.points;
+        m_NumRead = inputData.numRead;
+        m_Z = inputData.z;
+        m_Hiz = inputData.hiz;
+        m_Loz = inputData.loz;
+        m_kCenter = inputData.kCenter;
+        m_Cost = inputData.cost;
+        m_NumFeasible = inputData.numFeasible;
+        m_Feasible = inputData.feasible;
+        m_CallIndex = 0;
+
+        output["output_pfl"].push<PFLCallManager_Input>(PFLCallManager_Input(m_Points, m_NumRead, m_Z, m_kCenter, m_Cost, m_NumFeasible, m_Feasible, (long) (m_ITER * m_kMax * log((double) m_kMax)), 0.1));
+        input["input_main"].recycle();
+
+        return raft::proceed;
+    }
+    else if (input["input_pfl"].size() > 0)
+    {
+        // pfl was just completed
+        m_Cost = input["input_pfl"].peek<double>();
+        input["input_pfl"].recycle();
+
+        if (m_CallIndex == 0)
+        {
+            if (((*m_kCenter <= (1.1) * m_kMax) && (*m_kCenter >= (0.9) * m_kMin)) || ((*m_kCenter <= m_kMax + 2) && (*m_kCenter >= m_kMin - 2)))
+            {
+                m_CallIndex = 1;
+                output["output_pfl"].push<PFLCallManager_Input>(PFLCallManager_Input(m_Points, m_NumRead, m_Z, m_kCenter, m_Cost, m_NumFeasible, m_Feasible, (long) (m_ITER * m_kMax * log((double) m_kMax)), 0.001));
+                return raft::proceed;
+            }
+        }
+        else
+        {
+            m_CallIndex = 0;
+            if (*m_kCenter > m_kMax)
+            {
+                *m_Loz = *m_Z;
+                *m_Z = (*m_Hiz + *m_Loz) / 2.0;
+                m_Cost += (*m_Z - *m_Loz) * *m_kCenter;
+            }
+
+            if (*m_kCenter < m_kMin)
+            {
+                *m_Hiz = *m_Z;
+                *m_Z = (*m_Hiz + *m_Loz) / 2.0;
+                m_Cost += (*m_Z - *m_Hiz) * *m_kCenter;
+            }
+
+            bool should_break = ((*m_kCenter <= m_kMax) && (*m_kCenter >= m_kMin)) || ((*m_Loz >= (0.999) * *m_Hiz));
+            if (!should_break)
+            {
+                output["output_pfl"].push<PFLCallManager_Input>(PFLCallManager_Input(m_Points, m_NumRead, m_Z, m_kCenter, m_Cost, m_NumFeasible, m_Feasible, (long) (m_ITER * m_kMax * log((double) m_kMax)), 0.1));
+                return raft::proceed;
+            }
+
+            delete[] m_Feasible;
+            *m_kFinal = *m_kCenter;
+
+            output["output_cost"].push<double>(m_Cost);
+            return raft::proceed;
+        }
+
+    }
     return raft::proceed;
 }
 

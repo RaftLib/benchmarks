@@ -22,11 +22,13 @@ struct PSpeedyCallManager_Output
     Points* points;
     size_t numRead;
     double* z;
+    double* hiz;
+    double* loz;
     long* kCenter;
     double cost;
 
-    PSpeedyCallManager_Output() : points(nullptr), numRead(0), z(nullptr), kCenter(nullptr), cost(0.0) {}
-    PSpeedyCallManager_Output(Points* points, size_t numRead, double* z, long* kCenter, double cost) : points(points), numRead(numRead), z(z), kCenter(kCenter), cost(cost) {}
+    PSpeedyCallManager_Output() : points(nullptr), numRead(0), z(nullptr), kCenter(nullptr), cost(0.0), hiz(nullptr), loz(nullptr) {}
+    PSpeedyCallManager_Output(Points* points, size_t numRead, double* z, long* kCenter, double cost, double* hiz, double* loz) : points(points), numRead(numRead), z(z), kCenter(kCenter), cost(cost), hiz(hiz), loz(loz) {}
 };
 
 struct PSpeedyWorker_Input
@@ -78,9 +80,10 @@ struct SelectFeasible_FastKernel_Output
     long* kCenter;
     double cost;
     int numFeasible;
+    int* feasible;
 
-    SelectFeasible_FastKernel_Output() : points(nullptr), numRead(0), z(nullptr), kCenter(nullptr), cost(0.0), hiz(nullptr), loz(nullptr), numFeasible(0) {}
-    SelectFeasible_FastKernel_Output(Points* points, size_t numRead, double* z, long* kCenter, double cost, double* hiz, double* loz, int numFeasible) : points(points), numRead(numRead), z(z), kCenter(kCenter), cost(cost), hiz(hiz), loz(loz), numFeasible(numFeasible) {}
+    SelectFeasible_FastKernel_Output() : points(nullptr), numRead(0), z(nullptr), kCenter(nullptr), cost(0.0), hiz(nullptr), loz(nullptr), numFeasible(0), feasible(nullptr) {}
+    SelectFeasible_FastKernel_Output(Points* points, size_t numRead, double* z, long* kCenter, double cost, double* hiz, double* loz, int numFeasible, int* feasible) : points(points), numRead(numRead), z(z), kCenter(kCenter), cost(cost), hiz(hiz), loz(loz), numFeasible(numFeasible), feasible(feasible) {}
 };
 
 class SelectFeasible_FastKernel : public raft::kernel
@@ -325,6 +328,29 @@ private:
     unsigned int m_IterationIndex;
 public:
     PFLCallManager();
+    virtual raft::kstatus run();
+};
+
+class PKMedianPt3 : public raft::kernel
+{
+private:
+    long m_kMin;
+    long m_kMax;
+    long* m_kFinal;
+    Points* m_Points;
+    size_t m_NumRead;
+    double* m_Z;
+    double* m_Hiz;
+    double* m_Loz;
+    long* m_kCenter;
+    double m_Cost;
+    unsigned int m_ITER;
+    int m_NumFeasible;
+    int* m_Feasible;
+
+    unsigned int m_CallIndex;
+public:
+    PKMedianPt3(long kmin, long kmax, long* kfinal, unsigned int ITER);
     virtual raft::kstatus run();
 };
 

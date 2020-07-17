@@ -727,6 +727,8 @@ float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
   pthread_barrier_wait(barrier);
 #endif
 
+// PKMedianPt3 - start
+
   while(1) {
     /* first get a rough estimate on the FL solution */
     lastcost = cost;
@@ -759,9 +761,8 @@ float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
     /* if k is good, return the result */
     /* if we're stuck, just give up and return what we have */
     if (((k <= kmax)&&(k >= kmin))||((loz >= (0.999)*hiz)) )
-      { 
-	break;
-      }
+	      break;
+
 #ifdef ENABLE_THREADS
     pthread_barrier_wait(barrier);
 #endif
@@ -773,6 +774,8 @@ float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
     free(hizs);
     *kfinal = k;
   }
+
+// PKMedianPt3 - end
 
   return cost;
 }
