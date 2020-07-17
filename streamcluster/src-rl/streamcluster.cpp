@@ -236,11 +236,14 @@ double pgain(long x, Points *points, double z, long int *numcenters, int pid, pt
   pthread_barrier_wait(barrier);
 #endif
 
+  // PGainCallManager - start
+
   //my block
   long bsize = points->num/nproc;
   long k1 = bsize * pid;
   long k2 = k1 + bsize;
-  if( pid == nproc-1 ) k2 = points->num;
+  if( pid == nproc-1 ) 
+    k2 = points->num;
 
   int i;
   int number_of_centers_to_close = 0;
@@ -253,7 +256,8 @@ double pgain(long x, Points *points, double z, long int *numcenters, int pid, pt
   int stride = *numcenters+2;
   //make stride a multiple of CACHE_LINE
   int cl = CACHE_LINE/sizeof(double);
-  if( stride % cl != 0 ) { 
+  if( stride % cl != 0 ) 
+  { 
     stride = cl * ( stride / cl + 1);
   }
   int K = stride -2 ; // K==*numcenters
@@ -261,11 +265,14 @@ double pgain(long x, Points *points, double z, long int *numcenters, int pid, pt
   //my own cost of opening x
   double cost_of_opening_x = 0;
 
-  if( pid==0 )    { 
+  if( pid==0 )    
+  { 
     work_mem = (double*) malloc(stride*(nproc+1)*sizeof(double));
     gl_cost_of_opening_x = 0;
     gl_number_of_centers_to_close = 0;
   }
+
+// PGainCallManager - end
 
 #ifdef ENABLE_THREADS
   pthread_barrier_wait(barrier);
@@ -276,33 +283,49 @@ double pgain(long x, Points *points, double z, long int *numcenters, int pid, pt
     We first build a table to index the positions of the *lower* fields. 
   */
 
+// PGainWorker1 - start
+
   int count = 0;
-  for( int i = k1; i < k2; i++ ) {
-    if( is_center[i] ) {
+  for( int i = k1; i < k2; i++ ) 
+  {
+    if( is_center[i] ) 
+    {
       center_table[i] = count++;
     }
   }
   work_mem[pid*stride] = count;
 
+// PGainWorker1 - end
+
 #ifdef ENABLE_THREADS
   pthread_barrier_wait(barrier);
 #endif
 
-  if( pid == 0 ) {
+// PGainAccumulator1 - start
+
+  if( pid == 0 ) 
+  {
     int accum = 0;
-    for( int p = 0; p < nproc; p++ ) {
+    for( int p = 0; p < nproc; p++ ) 
+    {
       int tmp = (int)work_mem[p*stride];
       work_mem[p*stride] = accum;
       accum += tmp;
     }
   }
 
+// PGainAccumulator1 - end
+
 #ifdef ENABLE_THREADS
   pthread_barrier_wait(barrier);
 #endif
 
-  for( int i = k1; i < k2; i++ ) {
-    if( is_center[i] ) {
+// PGainWorker2 - start
+
+  for( int i = k1; i < k2; i++ ) 
+  {
+    if( is_center[i] ) 
+    {
       center_table[i] += (int)work_mem[pid*stride];
     }
   }
@@ -310,23 +333,33 @@ double pgain(long x, Points *points, double z, long int *numcenters, int pid, pt
   //now we finish building the table. clear the working memory.
   memset(switch_membership + k1, 0, (k2-k1)*sizeof(bool));
   memset(work_mem+pid*stride, 0, stride*sizeof(double));
-  if( pid== 0 ) memset(work_mem+nproc*stride,0,stride*sizeof(double));
+
+// PGainWorker2 - end
+
+// PGainAccumulator2 - start
+  if( pid== 0 ) 
+    memset(work_mem+nproc*stride,0,stride*sizeof(double));
+
+// PGainAccumulator2 - end
 
 #ifdef ENABLE_THREADS
   pthread_barrier_wait(barrier);
 #endif
+
+// PGainWorker3 - start
   
   //my *lower* fields
   double* lower = &work_mem[pid*stride];
   //global *lower* fields
   double* gl_lower = &work_mem[nproc*stride];
 
-  for ( i = k1; i < k2; i++ ) {
-    float x_cost = dist(points->p[i], points->p[x], points->dim) 
-      * points->p[i].weight;
+  for ( i = k1; i < k2; i++ ) 
+  {
+    float x_cost = dist(points->p[i], points->p[x], points->dim) * points->p[i].weight;
     float current_cost = points->p[i].cost;
 
-    if ( x_cost < current_cost ) {
+    if ( x_cost < current_cost ) 
+    {
 
       // point i would save cost just by switching to x
       // (note that i cannot be a median, 
@@ -335,7 +368,9 @@ double pgain(long x, Points *points, double z, long int *numcenters, int pid, pt
       switch_membership[i] = 1;
       cost_of_opening_x += x_cost - current_cost;
 
-    } else {
+    } 
+    else 
+    {
 
       // cost of assigning i to x is at least current assignment cost of i
 
@@ -349,28 +384,38 @@ double pgain(long x, Points *points, double z, long int *numcenters, int pid, pt
     }
   }
 
+// PGainWorker3 - end
+
+// PGainAccumulator3 - start and end
+
 #ifdef ENABLE_THREADS
   pthread_barrier_wait(barrier);
 #endif
 
+// PGainWorker 4 - start
+
   // at this time, we can calculate the cost of opening a center
   // at x; if it is negative, we'll go through with opening it
 
-  for ( int i = k1; i < k2; i++ ) {
-    if( is_center[i] ) {
+  for ( int i = k1; i < k2; i++ ) 
+  {
+    if( is_center[i] ) 
+    {
       double low = z;
       //aggregate from all threads
-      for( int p = 0; p < nproc; p++ ) {
-	low += work_mem[center_table[i]+p*stride];
+      for( int p = 0; p < nproc; p++ ) 
+      {
+	      low += work_mem[center_table[i]+p*stride];
       }
       gl_lower[center_table[i]] = low;
-      if ( low > 0 ) {
-	// i is a median, and
-	// if we were to open x (which we still may not) we'd close i
+      if ( low > 0 ) 
+      {
+        // i is a median, and
+        // if we were to open x (which we still may not) we'd close i
 
-	// note, we'll ignore the following quantity unless we do open x
-	++number_of_centers_to_close;  
-	cost_of_opening_x -= low;
+        // note, we'll ignore the following quantity unless we do open x
+        ++number_of_centers_to_close;  
+        cost_of_opening_x -= low;
       }
     }
   }
@@ -378,64 +423,91 @@ double pgain(long x, Points *points, double z, long int *numcenters, int pid, pt
   work_mem[pid*stride + K] = number_of_centers_to_close;
   work_mem[pid*stride + K+1] = cost_of_opening_x;
 
+// PGainWorker4 - end
+
 #ifdef ENABLE_THREADS
   pthread_barrier_wait(barrier);
 #endif
   //  printf("thread %d cost complete\n",pid); 
 
-  if( pid==0 ) {
+// PGainAccumulator4 - start
+
+  if( pid==0 )
+  {
     gl_cost_of_opening_x = z;
     //aggregate
-    for( int p = 0; p < nproc; p++ ) {
+    for( int p = 0; p < nproc; p++ ) 
+    {
       gl_number_of_centers_to_close += (int)work_mem[p*stride + K];
       gl_cost_of_opening_x += work_mem[p*stride+K+1];
     }
   }
+
+// PGainAccumulator4 - end
+
 #ifdef ENABLE_THREADS
   pthread_barrier_wait(barrier);
 #endif
   // Now, check whether opening x would save cost; if so, do it, and
   // otherwise do nothing
 
-  if ( gl_cost_of_opening_x < 0 ) {
+// PGainWorker5 - start
+
+  if ( gl_cost_of_opening_x < 0 ) 
+  {
     //  we'd save money by opening x; we'll do it
-    for ( int i = k1; i < k2; i++ ) {
-      bool close_center = gl_lower[center_table[points->p[i].assign]] > 0 ;
-      if ( switch_membership[i] || close_center ) {
-	// Either i's median (which may be i itself) is closing,
-	// or i is closer to x than to its current median
-	points->p[i].cost = points->p[i].weight *
-	  dist(points->p[i], points->p[x], points->dim);
-	points->p[i].assign = x;
+    for ( int i = k1; i < k2; i++ ) 
+    {
+      bool close_center = gl_lower[center_table[points->p[i].assign]] > 0;
+      if ( switch_membership[i] || close_center ) 
+      {
+        // Either i's median (which may be i itself) is closing,
+        // or i is closer to x than to its current median
+        points->p[i].cost = points->p[i].weight * dist(points->p[i], points->p[x], points->dim);
+        points->p[i].assign = x;
       }
     }
-    for( int i = k1; i < k2; i++ ) {
-      if( is_center[i] && gl_lower[center_table[i]] > 0 ) {
-	is_center[i] = false;
+    for( int i = k1; i < k2; i++ ) 
+    {
+      if( is_center[i] && gl_lower[center_table[i]] > 0 ) 
+      {
+	      is_center[i] = false;
       }
     }
-    if( x >= k1 && x < k2 ) {
+    if( x >= k1 && x < k2 ) 
+    {
       is_center[x] = true;
     }
 
-    if( pid==0 ) {
+    if( pid==0 ) 
+    {
       *numcenters = *numcenters + 1 - gl_number_of_centers_to_close;
     }
   }
-  else {
+  else 
+  {
     if( pid==0 )
       gl_cost_of_opening_x = 0;  // the value we'll return
   }
+
+// PGainWorker5 - end
+
 #ifdef ENABLE_THREADS
   pthread_barrier_wait(barrier);
 #endif
-  if( pid == 0 ) {
+
+// PGainAccumulator5 - start (and pid == 0 blocks from above included)
+
+  if( pid == 0 ) 
+  {
     free(work_mem);
     //    free(is_center);
     //    free(switch_membership);
     //    free(proc_cost_of_opening_x);
     //    free(proc_number_of_centers_to_close);
   }
+
+// PGainAccumulator5 - end
 
   return -gl_cost_of_opening_x;
 }
@@ -451,9 +523,9 @@ float pFL(Points *points, int *feasible, int numfeasible,
 	  float z, long *k, double cost, long iter, float e, 
 	  int pid, pthread_barrier_t* barrier)
 {
-#ifdef ENABLE_THREADS
+  #ifdef ENABLE_THREADS
   pthread_barrier_wait(barrier);
-#endif
+  #endif
   long i;
   long x;
   double change;
@@ -462,25 +534,28 @@ float pFL(Points *points, int *feasible, int numfeasible,
   change = cost;
   /* continue until we run iter iterations without improvement */
   /* stop instead if improvement is less than e */
-  while (change/cost > 1.0*e) {
+  while (change/cost > 1.0*e) 
+  {
     change = 0.0;
     numberOfPoints = points->num;
     /* randomize order in which centers are considered */
 
-    if( pid == 0 ) {
+    if( pid == 0 ) 
+    {
       intshuffle(feasible, numfeasible);
     }
-#ifdef ENABLE_THREADS
+    #ifdef ENABLE_THREADS
     pthread_barrier_wait(barrier);
-#endif
-    for (i=0;i<iter;i++) {
+    #endif
+    for (i=0;i<iter;i++) 
+    {
       x = i%numfeasible;
       change += pgain(feasible[x], points, z, k, pid, barrier);
     }
     cost -= change;
-#ifdef ENABLE_THREADS
+    #ifdef ENABLE_THREADS
     pthread_barrier_wait(barrier);
-#endif
+    #endif
   }
   return(cost);
 }
@@ -856,7 +931,8 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
 
   long IDoffset = 0;
   long kfinal;
-  while(1) {
+  while(1) 
+  {
 
     /**
      * TODO: figure out a way to set weights
