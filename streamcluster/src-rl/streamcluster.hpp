@@ -51,6 +51,7 @@ inline float dist( const Point &p1, const Point &p2, const int dim )
 }
 
 void shuffle(Points*);
+void intshuffle(int *intarray, int length)
 
 struct pkmedian_arg_t
 {

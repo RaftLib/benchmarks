@@ -292,5 +292,41 @@ public:
     virtual raft::kstatus run();
 };
 
+struct PFLCallManager_Input
+{
+    Points* points;
+    size_t numRead;
+    double* z;
+    long* kCenter;
+    double cost;
+    long iter;
+    float e;
+    int numFeasible;
+    int* feasible;
+
+    PFLCallManager_Input() : points(nullptr), numRead(0), z(nullptr), kCenter(nullptr), cost(0.0), numFeasible(0), iter(0), e(0.0), feasible(nullptr) {}
+    PFLCallManager_Input(Points* points, size_t numRead, double* z, long* kCenter, double cost, int numFeasible, int* feasible, long iter, double e) : points(points), numRead(numRead), z(z), kCenter(kCenter), cost(cost), numFeasible(numFeasible), iter(iter), e(e), feasible(feasible) {}
+};
+
+class PFLCallManager : public raft::kernel
+{
+private:
+    Points* m_Points;
+    size_t m_NumRead;
+    double* m_Z;
+    long* m_kCenter;
+    long m_Iter;
+    int* m_Feasible;
+    int m_NumFeasible;
+    double m_Change;
+    double m_Cost;
+    float m_E;
+
+    unsigned int m_IterationIndex;
+public:
+    PFLCallManager();
+    virtual raft::kstatus run();
+};
+
 
 #endif

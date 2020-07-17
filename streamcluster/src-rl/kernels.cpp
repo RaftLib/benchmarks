@@ -692,3 +692,74 @@ raft::kstatus PGainAccumulator5::run()
     return raft::proceed;
 }
 
+PFLCallManager::PFLCallManager()
+    : raft::kernel(), m_Change(0.0)
+{
+    // This is for when pFL is called in the code
+    input.addPort<PFLCallManager_Input>("input_main");
+
+    // This is for the result of pgain
+    input.addPort<double>("input_change");
+
+    // This is for calling pgain
+    output.addPort<PGainCallManager_Input>("output_pgain");
+
+    // This is the output of pFL
+    output.addPort<double>("output_cost");
+}
+
+raft::kstatus PFLCallManager::run()
+{
+    if (input["input_main"].size() > 0)
+    {
+        // This is a call for pFL
+        PFLCallManager_Input inputData = input["input_main"].peek<PFLCallManager_Input>();
+        m_Change = inputData.cost;
+        m_Cost = inputData.cost;
+        m_E = inputData.e;
+        m_Points = inputData.points;
+        m_NumRead = inputData.numRead;
+        m_Z = inputData.z;
+        m_kCenter = inputData.kCenter;
+        m_Iter = inputData.iter;
+        m_NumFeasible = inputData.numFeasible;
+        m_Feasible = inputData.feasible;
+        m_IterationIndex = 0;
+
+        intshuffle(m_Feasible, m_NumFeasible);
+
+        output["output_pgain"].push<PGainCallManager_Input>(PGainCallManager_Input(m_Points, m_NumRead, m_Z, m_kCenter, m_Cost, m_NumFeasible, m_IterationIndex % m_NumFeasible, 0));
+        input["input_main"].recycle();
+
+        return raft::proceed;
+    }
+    else if (input["input_change"].size() > 0)
+    {
+        // pgain has completed
+        m_IterationIndex++;
+
+        m_Change += input["input_change"].peek<double>();
+        input["input_chance"].recycle();
+
+        if (m_IterationIndex >= m_Iter)
+        {
+            m_Cost -= m_Change;
+            if (m_Change / m_Cost > 1.0 * m_E)
+            {
+                m_IterationIndex = 0;
+                m_Change = 0.0;
+                intshuffle(m_Feasible, m_NumFeasible);
+            }
+        }
+
+        if (m_IterationIndex < m_Iter)
+            output["output_pgain"].push<PGainCallManager_Input>(PGainCallManager_Input(m_Points, m_NumRead, m_Z, m_kCenter, m_Cost, m_NumFeasible, m_IterationIndex % m_NumFeasible, 0));
+        else
+            output["output_cost"].push<double>(m_Cost);
+
+        return raft::proceed;
+    }
+
+    return raft::proceed;
+}
+
