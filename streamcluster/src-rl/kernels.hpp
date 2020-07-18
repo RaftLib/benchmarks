@@ -46,8 +46,11 @@ private:
     Points* m_Points;
     Points* m_Centers;
     unsigned int m_ThreadCount;
+    bool** m_IsCenter;
+    int** m_CenterTable;
+    bool** m_SwitchMembership;
 public:
-    LocalSearchStarter(Points* points, Points* centers, unsigned int threadCount);
+    LocalSearchStarter(Points* points, Points* centers, unsigned int threadCount, bool** isCenter, int** centerTable, bool** switchMembership);
     virtual raft::kstatus run();
 };
 
@@ -167,9 +170,9 @@ class SelectFeasible_FastKernel : public raft::kernel
 private:
     int m_kMin;
     unsigned int m_ITER;
-    bool* m_IsCenter;
+    bool** m_IsCenter;
 public:
-    SelectFeasible_FastKernel(int kmin, unsigned int ITER, bool* is_center);
+    SelectFeasible_FastKernel(int kmin, unsigned int ITER, bool** is_center);
     virtual raft::kstatus run();
 };
 
@@ -220,10 +223,10 @@ struct PGainWorker1_IO
 class PGainWorker1 : public raft::kernel
 {
 private:
-    bool* m_IsCenter;
-    int* m_CenterTable;
+    bool** m_IsCenter;
+    int** m_CenterTable;
 public:
-    PGainWorker1(bool* is_center, int* center_table);
+    PGainWorker1(bool** is_center, int** center_table);
     virtual raft::kstatus run(); 
 };
 
@@ -239,11 +242,11 @@ public:
 class PGainWorker2 : public raft::kernel
 {
 private:
-    bool* m_IsCenter;
-    int* m_CenterTable;
-    bool* m_SwitchMembership;
+    bool** m_IsCenter;
+    int** m_CenterTable;
+    bool** m_SwitchMembership;
 public:
-    PGainWorker2(bool* is_center, int* center_table, bool* switch_membership);
+    PGainWorker2(bool** is_center, int** center_table, bool** switch_membership);
     virtual raft::kstatus run(); 
 };
 
@@ -259,12 +262,12 @@ public:
 class PGainWorker3 : public raft::kernel
 {
 private:
-    bool* m_IsCenter;
-    int* m_CenterTable;
-    bool* m_SwitchMembership;
+    bool** m_IsCenter;
+    int** m_CenterTable;
+    bool** m_SwitchMembership;
     unsigned int m_ThreadCount;
 public:
-    PGainWorker3(bool* is_center, int* center_table, bool* switch_membership, unsigned int m_ThreadCount);
+    PGainWorker3(bool** is_center, int** center_table, bool** switch_membership, unsigned int m_ThreadCount);
     virtual raft::kstatus run(); 
 };
 
@@ -305,11 +308,11 @@ public:
 class PGainWorker4 : public raft::kernel
 {
 private:
-    bool* m_IsCenter;
-    int* m_CenterTable;
+    bool** m_IsCenter;
+    int** m_CenterTable;
     unsigned int m_ThreadCount;
 public:
-    PGainWorker4(bool* is_center, int* center_table, unsigned int m_ThreadCount);
+    PGainWorker4(bool** is_center, int** center_table, unsigned int m_ThreadCount);
     virtual raft::kstatus run(); 
 };
 
@@ -351,11 +354,11 @@ public:
 class PGainWorker5 : public raft::kernel
 {
 private:
-    bool* m_IsCenter;
-    int* m_CenterTable;
-    bool* m_SwitchMembership;
+    bool** m_IsCenter;
+    int** m_CenterTable;
+    bool** m_SwitchMembership;
 public:
-    PGainWorker5(bool* is_center, int* center_table, bool* switch_membership);
+    PGainWorker5(bool** is_center, int** center_table, bool** switch_membership);
     virtual raft::kstatus run(); 
 };
 
@@ -421,9 +424,13 @@ private:
     int m_NumFeasible;
     int* m_Feasible;
 
+    bool** m_IsCenter;
+    bool** m_SwitchMembership;
+    int** m_CenterTable;
+
     unsigned int m_CallIndex;
 public:
-    PKMedianAccumulator2(long kmin, long kmax, long* kfinal, unsigned int ITER);
+    PKMedianAccumulator2(long kmin, long kmax, long* kfinal, unsigned int ITER, bool** isCenter, int** centerTable, bool** switchMembership);
     virtual raft::kstatus run();
 };
 

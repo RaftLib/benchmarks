@@ -931,71 +931,75 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
     centers.p[i].coord  = &centerBlock[i*dim];
   }
 
+  bool** switchMembership = new bool*[1];
+  bool** isCenter = new bool*[1];
+  int** centerTable = new int*[1];
+
   long IDoffset = 0;
   long kfinal;
 
   bool shouldContinue = true;
   // Kernel Initialization
   PStreamReader streamReader(stream, block, dim, chunksize, &shouldContinue, &IDoffset);
-  LocalSearchStarter localSearchStarter(&points, &centers, nproc);
-  PKMedianWorker1* pkMedianWorkers[nproc];
+  LocalSearchStarter localSearchStarter(&points, &centers, nproc, isCenter, centerTable, switchMembership);
+  std::vector<PKMedianWorker1*> pkMedianWorkers;
   PKMedianAccumulator1 pkMedianAccumulator1(kmin, kmax, &kfinal, nproc);
   PSpeedyCallManager pSpeedyCallManager(nproc, kmin, SP);
-  PSpeedyWorker* pSpeedyWorkers[nproc];
-  SelectFeasible_FastKernel selectFeasible(kmin, ITER, is_center);
+  std::vector<PSpeedyWorker*> pSpeedyWorkers;
+  SelectFeasible_FastKernel selectFeasible(kmin, ITER, isCenter);
   PGainCallManager pGainCallManager(CACHE_LINE, nproc);
-  PGainWorker1* pGainWorker1s[nproc];
+  std::vector<PGainWorker1*> pGainWorker1s;
   PGainAccumulator1 pGainAccumulator1(nproc);
-  PGainWorker2* pGainWorker2s[nproc];
+  std::vector<PGainWorker2*> pGainWorker2s;
   PGainAccumulator2 pGainAccumulator2(nproc);
-  PGainWorker3* pGainWorker3s[nproc];
+  std::vector<PGainWorker3*> pGainWorker3s;
   PGainAccumulator3 pGainAccumulator3(nproc);
-  PGainWorker4* pGainWorker4s[nproc];
+  std::vector<PGainWorker4*> pGainWorker4s;
   PGainAccumulator4 pGainAccumulator4(nproc);
-  PGainWorker5* pGainWorker5s[nproc];
+  std::vector<PGainWorker5*> pGainWorker5s;
   PGainAccumulator5 pGainAccumulator5(nproc);
   PFLCallManager pFLCallManager;
-  PKMedianAccumulator2 pkMedianAccumulator2(kmin, kmax, &kfinal, ITER);
+  PKMedianAccumulator2 pkMedianAccumulator2(kmin, kmax, &kfinal, ITER, isCenter, centerTable, switchMembership);
+  raft::map m;
 
   for (auto i = 0; i < nproc; i++)
   {
-    pkMedianWorkers[i] = new PKMedianWorker1();
-    pSpeedyWorkers[i] = new PSpeedyWorker();
-    pGainWorker1s[i] = new PGainWorker1(is_center, center_table);
-    pGainWorker2s[i] = new PGainWorker2(is_center, center_table, switch_membership);
-    pGainWorker3s[i] = new PGainWorker3(is_center, center_table, switch_membership, nproc);
-    pGainWorker4s[i] = new PGainWorker4(is_center, center_table, nproc);
-    pGainWorker5s[i] = new PGainWorker5(is_center, center_table, switch_membership);
+    pkMedianWorkers.push_back(new PKMedianWorker1);
+    pSpeedyWorkers.push_back(new PSpeedyWorker);
+    pGainWorker1s.push_back(new PGainWorker1(isCenter, centerTable));
+    pGainWorker2s.push_back(new PGainWorker2(isCenter, centerTable, switchMembership));
+    pGainWorker3s.push_back(new PGainWorker3(isCenter, centerTable, switchMembership, nproc));
+    pGainWorker4s.push_back(new PGainWorker4(isCenter, centerTable, nproc));
+    pGainWorker5s.push_back(new PGainWorker5(isCenter, centerTable, switchMembership));
   }
-
-  raft::map m;
 
   // Map Construction
   m += streamReader >> localSearchStarter;
-  pkMedianAccumulator1 >> pSpeedyCallManager["in_main"];
-  selectFeasible >> pkMedianAccumulator2["input_main"];
-  pkMedianAccumulator2["output_pfl"] >> pFLCallManager["input_main"];
-  pFLCallManager["output_pgain"] >> pGainCallManager;
-  pGainAccumulator5 >> pFLCallManager["input_change"];
-  pFLCallManager["output_cost"] >> pkMedianAccumulator2["input_pfl"];
+  m += pkMedianAccumulator1 >> pSpeedyCallManager["in_main"];
+  m += selectFeasible >> pkMedianAccumulator2["input_main"];
+  m += pkMedianAccumulator2["output_pfl"] >> pFLCallManager["input_main"];
+  m += pFLCallManager["output_pgain"] >> pGainCallManager;
+  m += pGainAccumulator5 >> pFLCallManager["input_change"];
+  m += pFLCallManager["output_cost"] >> pkMedianAccumulator2["input_pfl"];
+  m += pSpeedyCallManager["cost"] >> selectFeasible;
 
   for (auto i = 0; i < nproc; i++)
   {
     const char* to_str = std::to_string(i).c_str();
-    localSearchStarter[to_str] >> *(pkMedianWorkers[i]);
-    *(pkMedianWorkers[i]) >> pkMedianAccumulator1[to_str];
-    pSpeedyCallManager[to_str] >> *(pSpeedyWorkers[i]);
-    *(pSpeedyWorkers[i]) >> pSpeedyCallManager[to_str];
-    pGainCallManager[to_str] >> *(pGainWorker1s[i]);
-    *(pGainWorker1s[i]) >> pGainAccumulator1[to_str];
-    pGainAccumulator1[to_str] >> *(pGainWorker2s[i]);
-    *(pGainWorker2s[i]) >> pGainAccumulator2[to_str];
-    pGainAccumulator2[to_str] >> *(pGainWorker3s[i]);
-    *(pGainWorker3s[i]) >> pGainAccumulator3[to_str];
-    pGainAccumulator3[to_str] >> *(pGainWorker4s[i]);
-    *(pGainWorker4s[i]) >> pGainAccumulator4[to_str];
-    pGainAccumulator4[to_str] >> *(pGainWorker5s[i]);
-    *(pGainWorker5s[i]) >> pGainAccumulator5[to_str];
+    m += localSearchStarter[to_str] >> *(pkMedianWorkers[i]);
+    m += *(pkMedianWorkers[i]) >> pkMedianAccumulator1[to_str];
+    m += pSpeedyCallManager[to_str] >> *(pSpeedyWorkers[i]);
+    m += *(pSpeedyWorkers[i]) >> pSpeedyCallManager[to_str];
+    m += pGainCallManager[to_str] >> *(pGainWorker1s[i]);
+    m += *(pGainWorker1s[i]) >> pGainAccumulator1[to_str];
+    m += pGainAccumulator1[to_str] >> *(pGainWorker2s[i]);
+    m += *(pGainWorker2s[i]) >> pGainAccumulator2[to_str];
+    m += pGainAccumulator2[to_str] >> *(pGainWorker3s[i]);
+    m += *(pGainWorker3s[i]) >> pGainAccumulator3[to_str];
+    m += pGainAccumulator3[to_str] >> *(pGainWorker4s[i]);
+    m += *(pGainWorker4s[i]) >> pGainAccumulator4[to_str];
+    m += pGainAccumulator4[to_str] >> *(pGainWorker5s[i]);
+    m += *(pGainWorker5s[i]) >> pGainAccumulator5[to_str];
   }
 
   while (shouldContinue)
@@ -1071,13 +1075,17 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
   for (auto i = 0; i < nproc; i++)
   {
     delete pkMedianWorkers[i];
-    delete pSpeedyWorkers[i]; 
+    delete pSpeedyWorkers[i];
     delete pGainWorker1s[i];
-    delete pGainWorker2s[i]; 
-    delete pGainWorker3s[i]; 
-    delete pGainWorker4s[i]; 
-    delete pGainWorker5s[i]; 
+    delete pGainWorker2s[i];
+    delete pGainWorker3s[i];
+    delete pGainWorker4s[i];
+    delete pGainWorker5s[i];
   }
+
+  delete[] switchMembership;
+  delete[] isCenter;
+  delete[] centerTable;
 }
 
 int main(int argc, char **argv)
