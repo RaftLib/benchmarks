@@ -1,5 +1,162 @@
 #include "kernels.hpp"
 
+PStreamReader::PStreamReader(PStream* stream, float* block, int dim, long chunkSize, bool* shouldContinue, long* IDoffset)
+    : raft::kernel(), m_Stream(stream), m_Block(block), m_Dim(dim), m_ChunkSize(chunkSize), m_Continue(shouldContinue), m_IDoffset(IDoffset)
+{
+    // Create our output port
+    output.addPort<PStreamReader_Output>("output");
+    *m_Continue = true;
+}
+
+raft::kstatus PStreamReader::run()
+{
+    size_t numRead = 0;
+
+    if (*m_Continue)
+    {
+        // Get the number of points to operate on
+        size_t numRead = m_Stream->read(m_Block, m_Dim, m_ChunkSize);
+
+        // Error checking
+        if (m_Stream->ferror() || numRead < (unsigned int) m_ChunkSize && !m_Stream->feof())
+        {
+            std::cerr << "Error reading data!" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // Push our output data
+    output["output"].push<PStreamReader_Output>(PStreamReader_Output(numRead, !*m_Continue));
+    *m_IDoffset += numRead;
+
+    // If we've reached the end of the stream, alert the while loop
+    if (m_Stream->feof())
+        *m_Continue = false;
+
+    // The raft execution will be restarted each time an iteration of local search completes
+    // So here, we will stop until exe() is called again on the map
+    return raft::stop;
+}
+
+LocalSearchStarter::LocalSearchStarter(Points* points, Points* centers, unsigned int threadCount)
+    : raft::kernel(), m_Points(points), m_Centers(centers), m_ThreadCount(threadCount)
+{
+    // Create our input port
+    input.addPort<PStreamReader_Output>("input");
+
+    // Create our output ports based on the number of desired threads
+    for (auto i = 0; i < m_ThreadCount; i++)
+        output.addPort<LocalSearchStarter_Output>(std::to_string(i).c_str());
+}
+
+raft::kstatus LocalSearchStarter::run()
+{
+    // Get our input data
+    PStreamReader_Output inputData = input["input"].peek<PStreamReader_Output>();
+
+    // Calculate the blockSize for each "thread"
+    size_t blockSize = inputData.numRead / (size_t) m_ThreadCount;
+
+    for (auto i = 0; i < m_ThreadCount; i++)
+    {
+        if (inputData.useCenters)
+            output[std::to_string(i).c_str()].push<LocalSearchStarter_Output>(LocalSearchStarter_Output(m_Centers, m_Centers->num, blockSize, i));
+        else
+            output[std::to_string(i).c_str()].push<LocalSearchStarter_Output>(LocalSearchStarter_Output(m_Points, inputData.numRead, blockSize, i));
+    }
+        
+
+    // Cleanup
+    input["input"].recycle();
+
+    return raft::proceed;
+}
+
+PKMedianWorker1::PKMedianWorker1() : raft::kernel()
+{
+    input.addPort<LocalSearchStarter_Output>("input");
+    output.addPort<PKMedianWorker1_Output>("output");
+}
+
+raft::kstatus PKMedianWorker1::run()
+{
+    // Get input data
+    LocalSearchStarter_Output inputData = input["input"].peek<LocalSearchStarter_Output>();
+
+    // Calculate bounds for iteration
+    size_t k1 = inputData.blockSize * inputData.tid;
+    size_t k2 = k1 + inputData.blockSize;
+    if (k2 > inputData.numRead) 
+        k2 = inputData.numRead;
+
+    double hiz = 0.0;
+
+    // Calculate myHiz
+    for (auto i = k1; i < k2; i++)
+        hiz += dist(inputData.points->p[i], inputData.points->p[0], inputData.points->dim) * inputData.points->p[i].weight;
+
+    // Push result to output
+    output["out"].push<PKMedianWorker1_Output>(PKMedianWorker1_Output(inputData.points, inputData.numRead, hiz));
+
+    // Cleanup
+    input["in"].recycle();
+
+    return raft::proceed;
+}
+
+PKMedianAccumulator1::PKMedianAccumulator1(long kmin, long kmax, long* kFinal, unsigned int threadCount)
+    : raft::kernel_all(), m_kMin(kmin), m_kMax(kmax), m_kFinal(kFinal), m_ThreadCount(threadCount)
+{
+    // Create our input ports based on the number of desired threads
+    for (auto i = 0; i < m_ThreadCount; i++)
+        input.addPort<LocalSearchStarter_Output>(std::to_string(i).c_str());
+
+    // PSpeedyCallManager Output
+    output.addPort<PSpeedyCallManager_Input>("output");
+}
+
+raft::kstatus PKMedianAccumulator1::run()
+{
+    // Save the input data so we can recycle after reading once
+    double* hiz = new double(0.0);
+    double* loz = new double(0.0);
+    double* z = new double((*hiz + *loz) / 2.0);
+    long* kCenter = new long(0);
+    Points* points;
+    size_t numRead = 0;
+
+    // Read the input data
+    for (auto i = 0; i < m_ThreadCount; i++)
+    {
+        PKMedianWorker1_Output inputData = input[std::to_string(i).c_str()].peek<PKMedianWorker1_Output>();
+        numRead = inputData.numRead;
+        points = inputData.points;
+        *hiz += inputData.hiz;
+        input[std::to_string(i).c_str()].recycle();
+    }
+
+    if (numRead <= m_kMax)
+    {
+        for (auto kk = 0; kk < numRead; kk++)
+        {
+            points->p[kk].assign = kk;
+            points->p[kk].cost = 0;
+        }
+        *m_kFinal = *kCenter;
+
+        delete hiz;
+        delete loz;
+        delete z;
+        delete kCenter;
+
+        return raft::stop;
+    }
+
+    output["output"].push<PSpeedyCallManager_Input>(PSpeedyCallManager_Input(points, numRead, z, kCenter, hiz, loz));
+
+    return raft::proceed;
+}
+
 PSpeedyCallManager::PSpeedyCallManager(unsigned int threadCount, long kmin, unsigned int SP) : raft::kernel(), m_ThreadCount(threadCount), m_kMin(kmin), m_SP(SP)
 {
     // This input will come from whatever function calls pspeedy (should be pkmedian)
@@ -172,8 +329,8 @@ raft::kstatus PSpeedyWorker::run()
     return raft::proceed;
 }
 
-SelectFeasible_FastKernel::SelectFeasible_FastKernel(int** feasible, int kmin, unsigned int ITER, bool* is_center)
-    : raft::kernel(), m_Feasible(feasible), m_kMin(kmin), m_ITER(ITER), m_IsCenter(is_center)
+SelectFeasible_FastKernel::SelectFeasible_FastKernel(int kmin, unsigned int ITER, bool* is_center)
+    : raft::kernel(), m_kMin(kmin), m_ITER(ITER), m_IsCenter(is_center)
 {
     input.addPort<PSpeedyCallManager_Output>("input");
     output.addPort<SelectFeasible_FastKernel_Output>("output");
@@ -187,7 +344,7 @@ raft::kstatus SelectFeasible_FastKernel::run()
     if (numfeasible > (m_ITER * m_kMin * log((double) m_kMin)))
         numfeasible = (int) (m_ITER * m_kMin * log((double) m_kMin));
         
-    *m_Feasible = new int[numfeasible];
+    int* feasible = new int[numfeasible];
     
     //Calcuate my block. 
     //For now this routine does not seem to be the bottleneck, so it is not parallelized. 
@@ -208,17 +365,17 @@ raft::kstatus SelectFeasible_FastKernel::run()
     if (numfeasible == inputData.numRead) 
     {
         for (int i = k1; i < k2; i++)
-            (*m_Feasible)[i] = i;
+            feasible[i] = i;
     }
     else
     {
         float* accumweight = new float[inputData.numRead];
         float totalweight=0;
 
-        accumweight[0] = m_Points->p[0].weight;
+        accumweight[0] = inputData.points->p[0].weight;
         
         for (auto i = 1; i < inputData.numRead; i++ ) 
-            accumweight[i] = accumweight[i-1] + m_Points->p[i].weight;
+            accumweight[i] = accumweight[i-1] + inputData.points->p[i].weight;
 
         totalweight = accumweight[inputData.numRead-1];
 
@@ -230,7 +387,7 @@ raft::kstatus SelectFeasible_FastKernel::run()
             r= inputData.numRead - 1;
             if (accumweight[0] > w)  
             { 
-                (*m_Feasible)[i] = 0; 
+                feasible[i] = 0; 
                 continue;
             }
             while (l + 1 < r) 
@@ -241,7 +398,7 @@ raft::kstatus SelectFeasible_FastKernel::run()
                 else
                     l = k;
             }
-            (*m_Feasible)[i] = r;
+            feasible[i] = r;
         }
 
         delete[] accumweight; 
@@ -249,17 +406,16 @@ raft::kstatus SelectFeasible_FastKernel::run()
 
     // Will also perform the is_center assignments
     for (auto i = 0; i < inputData.numRead; i++)
-        m_IsCenter[m_Points->p[i].assign] = true;
+        m_IsCenter[inputData.points->p[i].assign] = true;
 
-    output["output"].push<SelectFeasible_FastKernel_Output>(SelectFeasible_FastKernel_Output(m_Points, inputData.numRead, inputData.z, inputData.kCenter, inputData.cost, inputData.hiz, inputData.loz, numfeasible, *m_Feasible));
-
-    
+    output["output"].push<SelectFeasible_FastKernel_Output>(SelectFeasible_FastKernel_Output(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, inputData.cost, inputData.hiz, inputData.loz, numfeasible, feasible));
+    input["input"].recycle();
 
     return raft::proceed;
 }
 
-PGainCallManager::PGainCallManager(int** feasible, unsigned int CACHE_LINE, unsigned int threadCount)
-    : raft::kernel(), m_Feasible(feasible), m_CL(CACHE_LINE / sizeof(double)), m_ThreadCount(threadCount)
+PGainCallManager::PGainCallManager(unsigned int CACHE_LINE, unsigned int threadCount)
+    : raft::kernel(), m_CL(CACHE_LINE / sizeof(double)), m_ThreadCount(threadCount)
 {
     input.addPort<PGainCallManager_Input>("input");
     
@@ -765,7 +921,7 @@ raft::kstatus PFLCallManager::run()
     return raft::proceed;
 }
 
-PKMedianPt3::PKMedianPt3(long kmin, long kmax, long* kfinal, unsigned int ITER)
+PKMedianAccumulator2::PKMedianAccumulator2(long kmin, long kmax, long* kfinal, unsigned int ITER)
     : raft::kernel(), m_kMin(kmin), m_kMax(kmax), m_ITER(ITER), m_kFinal(kfinal)
 {
     // This is the entry point to this kernel from selectfeasible_fast
@@ -781,7 +937,7 @@ PKMedianPt3::PKMedianPt3(long kmin, long kmax, long* kfinal, unsigned int ITER)
     output.addPort<double>("output_cost");
 }
 
-raft::kstatus PKMedianPt3::run()
+raft::kstatus PKMedianAccumulator2::run()
 {
     if (input["input_main"].size() > 0)
     {
@@ -842,10 +998,15 @@ raft::kstatus PKMedianPt3::run()
                 return raft::proceed;
             }
 
-            delete[] m_Feasible;
+            
             *m_kFinal = *m_kCenter;
 
-            output["output_cost"].push<double>(m_Cost);
+            delete[] m_Feasible;
+            delete m_Hiz;
+            delete m_Loz;
+            delete m_Z;
+
+            //output["output_cost"].push<double>(m_Cost); cost is not actually used after this
             return raft::proceed;
         }
 

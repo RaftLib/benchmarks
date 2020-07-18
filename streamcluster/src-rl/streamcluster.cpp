@@ -31,6 +31,7 @@
 #endif
 
 #include "streamcluster.hpp"
+#include "kernels.hpp"
 #define USE_RAFT
 
 constexpr static std::uint16_t MAXNAMESIZE = 1024;
@@ -634,7 +635,7 @@ int selectfeasible_fast(Points *points, int **feasible, int kmin, int pid, pthre
 float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
 	       int pid, pthread_barrier_t* barrier )
 {
-  // pkmedian part 1 start
+  // PKMedianWorker1 - start
   int i;
   double cost;
   double lastcost;
@@ -664,11 +665,13 @@ float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
 
   hizs[pid] = myhiz;
 
-  // pkmedian part 1 end, part 2 start
+  // PKMedianWorker1 - end
 
 #ifdef ENABLE_THREADS  
   pthread_barrier_wait(barrier);
 #endif
+
+// PKMedianAccumulator1 - start
 
   for( int i = 0; i < nproc; i++ )   {
     hiz += hizs[i];
@@ -690,7 +693,7 @@ float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
     return cost;
   }
 
-  // pkmedian part 2 end
+  // PKMedianAccumulator1 - end
 
   if( pid == 0 ) shuffle(points);
   cost = pspeedy(points, z, &k, pid, barrier);
@@ -727,7 +730,7 @@ float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
   pthread_barrier_wait(barrier);
 #endif
 
-// PKMedianPt3 - start
+// PKMedianAccumulator2 - start
 
   while(1) {
     /* first get a rough estimate on the FL solution */
@@ -775,7 +778,7 @@ float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
     *kfinal = k;
   }
 
-// PKMedianPt3 - end
+// PKMedianAccumulator2 - end
 
   return cost;
 }
@@ -903,12 +906,8 @@ void outcenterIDs( Points* centers, long* centerIDs, char* outfile ) {
   fclose(fp);
 }
 
-
-
-#ifndef USE_RAFT 
 void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksize, long centersize, char* outfile)
 {
-  
   float* block = (float*)malloc( chunksize*dim*sizeof(float) );
   float* centerBlock = (float*)malloc(centersize*dim*sizeof(float) );
   long* centerIDs = (long*)malloc(centersize*dim*sizeof(long));
@@ -934,8 +933,75 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
 
   long IDoffset = 0;
   long kfinal;
-  while(1) 
+
+  bool shouldContinue = true;
+  // Kernel Initialization
+  PStreamReader streamReader(stream, block, dim, chunksize, &shouldContinue, &IDoffset);
+  LocalSearchStarter localSearchStarter(&points, &centers, nproc);
+  PKMedianWorker1* pkMedianWorkers[nproc];
+  PKMedianAccumulator1 pkMedianAccumulator1(kmin, kmax, &kfinal, nproc);
+  PSpeedyCallManager pSpeedyCallManager(nproc, kmin, SP);
+  PSpeedyWorker* pSpeedyWorkers[nproc];
+  SelectFeasible_FastKernel selectFeasible(kmin, ITER, is_center);
+  PGainCallManager pGainCallManager(CACHE_LINE, nproc);
+  PGainWorker1* pGainWorker1s[nproc];
+  PGainAccumulator1 pGainAccumulator1(nproc);
+  PGainWorker2* pGainWorker2s[nproc];
+  PGainAccumulator2 pGainAccumulator2(nproc);
+  PGainWorker3* pGainWorker3s[nproc];
+  PGainAccumulator3 pGainAccumulator3(nproc);
+  PGainWorker4* pGainWorker4s[nproc];
+  PGainAccumulator4 pGainAccumulator4(nproc);
+  PGainWorker5* pGainWorker5s[nproc];
+  PGainAccumulator5 pGainAccumulator5(nproc);
+  PFLCallManager pFLCallManager;
+  PKMedianAccumulator2 pkMedianAccumulator2(kmin, kmax, &kfinal, ITER);
+
+  for (auto i = 0; i < nproc; i++)
   {
+    pkMedianWorkers[i] = new PKMedianWorker1();
+    pSpeedyWorkers[i] = new PSpeedyWorker();
+    pGainWorker1s[i] = new PGainWorker1(is_center, center_table);
+    pGainWorker2s[i] = new PGainWorker2(is_center, center_table, switch_membership);
+    pGainWorker3s[i] = new PGainWorker3(is_center, center_table, switch_membership, nproc);
+    pGainWorker4s[i] = new PGainWorker4(is_center, center_table, nproc);
+    pGainWorker5s[i] = new PGainWorker5(is_center, center_table, switch_membership);
+  }
+
+  raft::map m;
+
+  // Map Construction
+  m += streamReader >> localSearchStarter;
+  pkMedianAccumulator1 >> pSpeedyCallManager["in_main"];
+  selectFeasible >> pkMedianAccumulator2["input_main"];
+  pkMedianAccumulator2["output_pfl"] >> pFLCallManager["input_main"];
+  pFLCallManager["output_pgain"] >> pGainCallManager;
+  pGainAccumulator5 >> pFLCallManager["input_change"];
+  pFLCallManager["output_cost"] >> pkMedianAccumulator2["input_pfl"];
+
+  for (auto i = 0; i < nproc; i++)
+  {
+    const char* to_str = std::to_string(i).c_str();
+    localSearchStarter[to_str] >> *(pkMedianWorkers[i]);
+    *(pkMedianWorkers[i]) >> pkMedianAccumulator1[to_str];
+    pSpeedyCallManager[to_str] >> *(pSpeedyWorkers[i]);
+    *(pSpeedyWorkers[i]) >> pSpeedyCallManager[to_str];
+    pGainCallManager[to_str] >> *(pGainWorker1s[i]);
+    *(pGainWorker1s[i]) >> pGainAccumulator1[to_str];
+    pGainAccumulator1[to_str] >> *(pGainWorker2s[i]);
+    *(pGainWorker2s[i]) >> pGainAccumulator2[to_str];
+    pGainAccumulator2[to_str] >> *(pGainWorker3s[i]);
+    *(pGainWorker3s[i]) >> pGainAccumulator3[to_str];
+    pGainAccumulator3[to_str] >> *(pGainWorker4s[i]);
+    *(pGainWorker4s[i]) >> pGainAccumulator4[to_str];
+    pGainAccumulator4[to_str] >> *(pGainWorker5s[i]);
+    *(pGainWorker5s[i]) >> pGainAccumulator5[to_str];
+  }
+
+  while (shouldContinue)
+  {
+  //while(1) 
+  //{
 
     /**
      * TODO: figure out a way to set weights
@@ -943,6 +1009,7 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
      * PIPELINE IDEA
      * streamread -> setweights -> localsearch
      */
+    /*
     size_t numRead  = stream->read(block, dim, chunksize ); 
     fprintf(stderr,"read %d points\n",numRead);
 
@@ -955,7 +1022,7 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
     for( int i = 0; i < points.num; i++ ) {
       points.p[i].weight = 1.0;
     }
-
+    */
     switch_membership = (bool*)malloc(points.num*sizeof(bool));
     is_center = (bool*)calloc(points.num,sizeof(bool));
     center_table = (int*)malloc(points.num*sizeof(int));
@@ -964,7 +1031,11 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
     //fprintf(stderr,"center_table = 0x%08x\n",(int)center_table);
     //fprintf(stderr,"is_center = 0x%08x\n",(int)is_center);
 
-    localSearch(&points,kmin, kmax,&kfinal); // parallel
+    //localSearch(&points,kmin, kmax,&kfinal); // parallel
+    
+
+    m.exe();
+
 
     //fprintf(stderr,"finish local search\n");
     contcenters(&points); /* sequential */
@@ -975,15 +1046,16 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
     }
 
     copycenters(&points, &centers, centerIDs, IDoffset); /* sequential */
-    IDoffset += numRead;
+    //IDoffset += numRead;
+    //IDoffset += 0;
 
     free(is_center);
     free(switch_membership);
     free(center_table);
 
-    if( stream->feof() ) {
-      break;
-    }
+    //if( stream->feof() ) {
+    //  break;
+    //}
   }
 
   //finally cluster all temp centers
@@ -991,125 +1063,21 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
   is_center = (bool*)calloc(centers.num,sizeof(bool));
   center_table = (int*)malloc(centers.num*sizeof(int));
 
-  localSearch( &centers, kmin, kmax ,&kfinal ); // parallel
+  //localSearch( &centers, kmin, kmax ,&kfinal ); // parallel
+  m.exe();
   contcenters(&centers);
   outcenterIDs( &centers, centerIDs, outfile);
-#else
-void streamCluster(PStream* stream, size_t fileSize, long kmin, long kmax, int dim, long chunksize, long centersize, char* outfile)
-{
-  
-
-  // The stream will not be read for more iterations than this amount
-  std::uintmax_t numOfIterations = fileSize / (chunksize * dim * sizeof(float)) + 1;
-
-  // Create our data structures
-  float** blocks = new float*[numOfIterations];
-  float** centerBlocks = new float*[numOfIterations];
-  long** centerIDs = new long*[numOfIterations];
-
-  for (auto i = 0; i < numOfIterations; i++)
-  {
-    blocks[i] = new float[chunksize * dim];
-    centerBlocks[i] = new float[centersize * dim];
-    centerIDs[i] = new long[centersize * dim];
-  }
-
-  Points** points = new Points*[numOfIterations];
-  Points** centers = new Points*[numOfIterations];
-
-  for (auto i = 0; i < numOfIterations; i++)
-  {
-    points[i] = new Points(chunksize, dim, chunksize);
-    for (auto j = 0; j < chunksize; j++)
-      points[i]->p[j].coord = &(blocks[i][j * dim]);
-
-    centers[i] = new Points(0, dim, centersize);
-    for (auto j = 0; j < centersize; j++)
-      centers[i]->p[j].coord = &(centerBlocks[i][j * dim]);
-  }
-
-  size_t* kCenters = new size_t[numOfIterations];
-  size_t* kFinals = new size_t[numOfIterations];
-
-  // The complete execution streamCluster is divided into multiple parts due to uncertain exit conditions on loops
-  PSpeedySum_Output* firstOutputs = new PSpeedySum_Output[numOfIterations];
-
-  // First Part Kernels
-  PStreamReader* streamReader = new PStreamReader(stream, blocks, dim, chunksize);
-  LocalSearchStarter* localSearchStarter = new LocalSearchStarter(points, nproc);
-  PKMedianPt1** pkMedianPt1s = new PKMedianPt1*[nproc];
-  PKMedianPt2* pkMedianPt2 = new PKMedianPt2(points, kCenters, nproc);
-  PSpeedyKernel** pSpeedyKernels = new PSpeedyKernel*[nproc];
-  PSpeedySum* pSpeedySum = new PSpeedySum(points, firstOutputs, nproc, kCenters);
 
   for (auto i = 0; i < nproc; i++)
   {
-    pkMedianPt1s[i] = new PKMedianPt1(points, kCenters, kmax, kFinals);
-    pSpeedyKernels[i] = new PSpeedyKernel(points);
+    delete pkMedianWorkers[i];
+    delete pSpeedyWorkers[i]; 
+    delete pGainWorker1s[i];
+    delete pGainWorker2s[i]; 
+    delete pGainWorker3s[i]; 
+    delete pGainWorker4s[i]; 
+    delete pGainWorker5s[i]; 
   }
-
-  raft::map partOneMap;
-  partOneMap += *streamReader >> *localSearchStarter;
-  for (auto i = 0; i < nproc; i++)
-  {
-    char buffer0[128]; // out0, out1, out2, etc...
-    char buffer1[128]; // in0, in1, in2, etc...
-    sprintf(buffer0, "out%d", i);
-    sprintf(buffer1, "in%d", i);
-    
-    // localSearchStarter "spawns" nproc threads
-    partOneMap += (*localSearchStarter)[buffer0] >> *(pkMedianPt1s[i]);
-
-    // pkMedianPt2 "joins" nproc threads
-    partOneMap += *(pkMedianPt1s[i]) >> (*pkMedianPt2)[buffer1];
-
-    // pkMedianPt2 "spawns" nproc threads
-    partOneMap += (*pkMedianPt2)[buffer0] >> *(pSpeedyKernels[i]);
-
-    // pSpeedySum "joins" nproc threads
-    partOneMap += *(pSpeedyKernels[i]) >> (*pSpeedySum)[buffer1];
-  }
-    
-
-  //partOneMap.exe();
-
-  // Cleanup
-  delete streamReader;
-  delete localSearchStarter;
-  delete pkMedianPt2;
-  delete pSpeedySum;
-  for (auto i = 0; i < nproc; i++)
-  {
-    delete pkMedianPt1s[i];
-    delete pSpeedyKernels[i];
-  }
-  delete[] pkMedianPt1s;
-  delete[] pSpeedyKernels;
-
-  delete[] kCenters;
-  delete[] kFinals;
-
-  for (auto i = 0; i < numOfIterations; i++)
-  {
-    delete points[i];
-    delete centers[i];
-  }
-
-  delete[] points;
-  delete[] centers;
-
-  for (auto i = 0; i < numOfIterations; i++)
-  {
-    delete[] blocks[i];
-    delete[] centerBlocks[i];
-    delete[] centerIDs[i];
-  }
-
-  delete[] blocks;
-  delete[] centerBlocks;
-  delete[] centerIDs;
-
-#endif
 }
 
 int main(int argc, char **argv)
@@ -1158,26 +1126,7 @@ int main(int argc, char **argv)
     stream = new FileStream(infilename);
   }
 
-#ifndef USE_RAFT
   streamCluster(stream, kmin, kmax, dim, chunksize, clustersize, outfilename );
-#else
-  if (n > 0)
-  {
-    streamCluster(stream, n * dim * sizeof(float), kmin, kmax, dim, chunksize, clustersize, outfilename);
-  }
-  else
-  {
-    //std::uintmax_t size = std::filesystem::file_size(infilename);
-    std::ifstream file; 
-    file.open(infilename, std::iostream::in|std::iostream::binary);
-    file.ignore(std::numeric_limits<std::streamsize>::max());
-    std::streamsize length = file.gcount();
-    file.clear();
-    //file.seekg(0, std::iostream::beg);
-    streamCluster(stream, (size_t) length, kmin, kmax, dim, chunksize, clustersize, outfilename);
-  }
-
-#endif
 
   delete stream;
   

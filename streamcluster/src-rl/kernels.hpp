@@ -4,6 +4,82 @@
 #include "streamcluster.hpp"
 #include <raft>
 
+struct PStreamReader_Output
+{
+    size_t numRead;
+    bool useCenters;
+
+    PStreamReader_Output() : numRead(0), useCenters(false) {}
+    PStreamReader_Output(size_t numRead, bool useCenters) : numRead(numRead), useCenters(useCenters) {}
+};
+
+class PStreamReader : public raft::kernel
+{
+private:
+    PStream* m_Stream;
+    int m_Dim;
+    long m_ChunkSize;
+    float* m_Block;
+
+    bool* m_Continue;
+    long* m_IDoffset;
+
+public:
+    PStreamReader(PStream* stream, float* block, int dim, long chunkSize, bool* shouldContinue, long* IDoffset);
+    virtual raft::kstatus run();
+};
+
+struct LocalSearchStarter_Output
+{
+    Points* points;
+    size_t numRead;
+    size_t blockSize;
+    unsigned int tid;
+
+    LocalSearchStarter_Output() : points(nullptr), numRead(0), blockSize(0), tid(0) {}
+    LocalSearchStarter_Output(Points* points, size_t numRead, size_t blockSize, unsigned int tid) : points(points), numRead(numRead), blockSize(blockSize), tid(tid) {}
+};
+
+class LocalSearchStarter : public raft::kernel
+{
+private:
+    Points* m_Points;
+    Points* m_Centers;
+    unsigned int m_ThreadCount;
+public:
+    LocalSearchStarter(Points* points, Points* centers, unsigned int threadCount);
+    virtual raft::kstatus run();
+};
+
+struct PKMedianWorker1_Output
+{
+    Points* points;
+    size_t numRead;
+    double hiz;
+
+    PKMedianWorker1_Output() : points(nullptr), numRead(0), hiz(0.0) {}
+    PKMedianWorker1_Output(Points* points, size_t numRead, double hiz) : points(points), numRead(numRead), hiz(hiz) {}
+};
+
+class PKMedianWorker1 : public raft::kernel
+{
+public:
+    PKMedianWorker1();
+    virtual raft::kstatus run();
+};
+
+class PKMedianAccumulator1 : public raft::kernel_all
+{
+private:
+    long m_kMin;
+    long m_kMax;
+    long* m_kFinal;
+    unsigned int m_ThreadCount;
+public:
+    PKMedianAccumulator1(long kmin, long kmax, long* kFinal, unsigned int threadCount);
+    virtual raft::kstatus run();
+};
+
 struct PSpeedyCallManager_Input
 {
     Points* points;
@@ -89,13 +165,11 @@ struct SelectFeasible_FastKernel_Output
 class SelectFeasible_FastKernel : public raft::kernel
 {
 private:
-    Points* m_Points;
-    int** m_Feasible;
     int m_kMin;
     unsigned int m_ITER;
     bool* m_IsCenter;
 public:
-    SelectFeasible_FastKernel(int** feasible, int kmin, unsigned int ITER, bool* is_center);
+    SelectFeasible_FastKernel(int kmin, unsigned int ITER, bool* is_center);
     virtual raft::kstatus run();
 };
 
@@ -117,11 +191,10 @@ struct PGainCallManager_Input
 class PGainCallManager : public raft::kernel
 {
 private:
-    int** m_Feasible;
     unsigned int m_CL;
     unsigned int m_ThreadCount;
 public:
-    PGainCallManager(int** feasible, unsigned int CACHE_LINE, unsigned int threadCount);
+    PGainCallManager(unsigned int CACHE_LINE, unsigned int threadCount);
     virtual raft::kstatus run();
 };
 
@@ -331,7 +404,7 @@ public:
     virtual raft::kstatus run();
 };
 
-class PKMedianPt3 : public raft::kernel
+class PKMedianAccumulator2 : public raft::kernel
 {
 private:
     long m_kMin;
@@ -350,7 +423,7 @@ private:
 
     unsigned int m_CallIndex;
 public:
-    PKMedianPt3(long kmin, long kmax, long* kfinal, unsigned int ITER);
+    PKMedianAccumulator2(long kmin, long kmax, long* kfinal, unsigned int ITER);
     virtual raft::kstatus run();
 };
 
