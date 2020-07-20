@@ -159,8 +159,6 @@ raft::kstatus PKMedianAccumulator1::run()
         input[std::to_string(i).c_str()].recycle();
     }
 
-    std::cout << "Accumulated hiz is " << *hiz << std::endl;
-
     if (numRead <= m_kMax)
     {
         for (auto kk = 0; kk < numRead; kk++)
@@ -178,8 +176,6 @@ raft::kstatus PKMedianAccumulator1::run()
         return raft::stop;
         // This causes a bug... program does not stop when this code is reached.
     }
-
-    std::cout << "Made it this far" << std::endl;
 
     output["output"].push<PSpeedyCallManager_Input>(PSpeedyCallManager_Input(points, numRead, z, kCenter, hiz, loz));
 
@@ -213,7 +209,6 @@ raft::kstatus PSpeedyCallManager::run()
     std::cout << "Executing PSpeedyCallManager run" << std::endl;
     if (input["in_main"].size() > 0)
     {
-        std::cout << "PSpeedyCallManager called from PKMedian" << std::endl;
         // This code runs when PSpeedyCallManager is given data from the call in pkmedian 
         // Should only be called once per iteration
         PSpeedyCallManager_Input inputData = input["in_main"].peek<PSpeedyCallManager_Input>();
@@ -253,8 +248,6 @@ raft::kstatus PSpeedyCallManager::run()
         if (!allThreadsFinished)
             return raft::proceed;
 
-        std::cout << "All threaeds have finished, proceed with checks" << std::endl;
-        
         // Checks that take care of the 3 function calls of pspeedy
         if (m_IterationIndex >= m_NumRead)
         {
@@ -262,29 +255,20 @@ raft::kstatus PSpeedyCallManager::run()
             // Now, we need to decide whether to perform another based upon the values of kCenter, kmin, and SP
             m_PSpeedyExecutionCount++;
             
-
-            std::cout << "PSpeedy execution completed, deciding what to do now" << std::endl;
-
             if ((*m_kCenter < m_kMin) && (m_PSpeedyExecutionCount < m_SP + 1))
             {
                 // At this point, we are giving pspeedy SP chances to get at least kmin/2 facilities
                 // Perform pspeedy again like we just restarted
                 m_IterationIndex = 0;
                 *m_kCenter = 1;
-                std::cout << "Giving speedy SP chances to get facilities" << std::endl;
             }
             else if (*m_kCenter < m_kMin)
             {
                 // At this point, we are now assuming that z is too high and will decrease its value for each new call of pspeedy
-                std::cout << "Z is too high" << std::endl;
-                std::cout << "Z was " << *m_Z << std::endl;
-                std::cout << "Hiz was " << *m_Hiz << std::endl;
-                std::cout << "Loz was " << *m_Loz << std::endl;
                 m_IterationIndex = 0;
                 shuffle(m_Points);
                 *m_Hiz = *m_Z;
                 *m_Z = (*m_Hiz + *m_Loz) / 2.0;
-                std::cout << "Z is now " << *m_Z << std::endl;
                 m_PSpeedyExecutionCount = 0;
                 *m_kCenter = 1;
             }
@@ -292,7 +276,6 @@ raft::kstatus PSpeedyCallManager::run()
 
         if (m_IterationIndex < m_NumRead)
         {
-            std::cout << "Picking new centers" << std::endl;
             // We will try to pick another center
             bool to_open = ((float) lrand48() / (float) INT_MAX) < (m_Points->p[m_IterationIndex].cost / *m_Z);
             if (to_open)
@@ -306,7 +289,6 @@ raft::kstatus PSpeedyCallManager::run()
         }
         else
         {
-            std::cout << "Done picking centers, proceeding to selectfeasible" << std::endl;
             // We are done picking centers, sum the costs (with the starting value) and then "return"
             double totalCost = *m_Z * *m_kCenter;
             for (auto i = 0; i < m_ThreadCount; i++)
@@ -507,7 +489,7 @@ raft::kstatus PGainWorker1::run()
     std::cout << "Executing PGainWorker1 run" << std::endl;
     PGainWorker1_IO inputData = input["input"].peek<PGainWorker1_IO>();
 
-    int stride = inputData.stride;
+    unsigned int stride = inputData.stride;
     int cl = inputData.cl;
     unsigned int k1 = inputData.blockSize * inputData.tid;
     unsigned int k2 = k1 + inputData.blockSize;
@@ -585,7 +567,7 @@ raft::kstatus PGainWorker2::run()
     std::cout << "Executing PGainWorker2 run" << std::endl;
     PGainWorker1_IO inputData = input["input"].peek<PGainWorker1_IO>();
 
-    int stride = inputData.stride;
+    unsigned int stride = inputData.stride;
     unsigned int k1 = inputData.blockSize * inputData.tid;
     unsigned int k2 = k1 + inputData.blockSize;
     if (k2 > inputData.numRead)
@@ -597,8 +579,8 @@ raft::kstatus PGainWorker2::run()
             (*m_CenterTable)[i] += (int) inputData.work_mem[inputData.tid * stride];
     }
 
-    memset(m_SwitchMembership + k1, 0, (k2 - k1) * sizeof(bool));
-    memset(inputData.work_mem + inputData.tid * stride, 0, stride * sizeof(double));
+    memset(*m_SwitchMembership + k1, 0, (k2 - k1) * sizeof(bool));
+    memset(inputData.work_mem + inputData.tid * stride, 0, stride * sizeof(double)); // getting stuck here, sometimes segfaults
 
     output["output"].push<PGainWorker1_IO>(PGainWorker1_IO(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, inputData.cost, inputData.numFeasible, inputData.stride, inputData.cl, inputData.work_mem, inputData.tid, inputData.blockSize, inputData.x));
     input["input"].recycle();
@@ -676,9 +658,7 @@ raft::kstatus PGainWorker3::run()
             // point i would save cost just by switching to x
             // (note that i cannot be a median, 
             // or else dist(p[i], p[x]) would be 0)
-            std::cout << "Made it this far" << std::endl;
-            (*m_SwitchMembership)[i] = 1; // this causes a segfault
-            std::cout << "Made it this far3" << std::endl;
+            (*m_SwitchMembership)[i] = 1;
             cost_of_opening_x += x_cost - current_cost;
             
         } 
@@ -720,15 +700,10 @@ raft::kstatus PGainAccumulator3::run()
     std::cout << "Executing PGainAccumulator3 run" << std::endl;
     for (auto i = 0; i < m_ThreadCount; i++)
     {
-        std::cout << "PGainAccumulator3 0" << std::endl;
         PGainWorker3_Output inputData = input[std::to_string(i).c_str()].peek<PGainWorker3_Output>();
-        std::cout << "PGainAccumulator3 1" << std::endl;
         output[std::to_string(i).c_str()].push<PGainWorker3_Output>(inputData);
-        std::cout << "PGainAccumulator3 2" << std::endl;
         input[std::to_string(i).c_str()].recycle();
-        std::cout << "PGainAccumulator3 3" << std::endl;
     }
-    std::cout << "PGainAccumulator3 done" << std::endl;
 
     return raft::proceed;
 }
@@ -750,7 +725,7 @@ raft::kstatus PGainWorker4::run()
     if (k2 > inputData.numRead)
         k2 = inputData.numRead;
 
-    unsigned int number_of_centers_to_close;
+    unsigned int number_of_centers_to_close = 0;
 
     for (auto i = k1; i < k2; i++) 
     {
@@ -853,7 +828,7 @@ raft::kstatus PGainWorker5::run()
 
         for (auto i = k1; i < k2; i++)
         {
-            if ((*m_IsCenter[i]) && inputData.gl_lower[(*m_CenterTable)[i]] > 0)
+            if ((*m_IsCenter)[i] && inputData.gl_lower[(*m_CenterTable)[i]] > 0)
                 (*m_IsCenter)[i] = false;
         }
 
@@ -979,7 +954,10 @@ raft::kstatus PFLCallManager::run()
         if (m_IterationIndex < m_Iter)
             output["output_pgain"].push<PGainCallManager_Input>(PGainCallManager_Input(m_Points, m_NumRead, m_Z, m_kCenter, m_Cost, m_NumFeasible, m_IterationIndex % m_NumFeasible, 0));
         else
+        {
             output["output_cost"].push<double>(m_Cost);
+            return raft::stop;
+        }
 
         return raft::proceed;
     }
@@ -1032,14 +1010,13 @@ raft::kstatus PKMedianAccumulator2::run()
         m_Cost = input["input_pfl"].peek<double>();
         input["input_pfl"].recycle();
 
-        if (m_CallIndex == 0)
+        bool should_run_again = ((*m_kCenter <= (1.1) * m_kMax) && (*m_kCenter >= (0.9) * m_kMin)) || ((*m_kCenter <= m_kMax + 2) && (*m_kCenter >= m_kMin - 2));
+
+        if (m_CallIndex == 0 && should_run_again)
         {
-            if (((*m_kCenter <= (1.1) * m_kMax) && (*m_kCenter >= (0.9) * m_kMin)) || ((*m_kCenter <= m_kMax + 2) && (*m_kCenter >= m_kMin - 2)))
-            {
-                m_CallIndex = 1;
-                output["output_pfl"].push<PFLCallManager_Input>(PFLCallManager_Input(m_Points, m_NumRead, m_Z, m_kCenter, m_Cost, m_NumFeasible, m_Feasible, (long) (m_ITER * m_kMax * log((double) m_kMax)), 0.001));
-                return raft::proceed;
-            }
+            m_CallIndex = 1;
+            output["output_pfl"].push<PFLCallManager_Input>(PFLCallManager_Input(m_Points, m_NumRead, m_Z, m_kCenter, m_Cost, m_NumFeasible, m_Feasible, (long) (m_ITER * m_kMax * log((double) m_kMax)), 0.001));
+            return raft::proceed;
         }
         else
         {
@@ -1077,6 +1054,7 @@ raft::kstatus PKMedianAccumulator2::run()
             delete[] *m_CenterTable;
 
             //output["output_cost"].push<double>(m_Cost); cost is not actually used after this
+            std::cout << "We are done!" << std::endl;
             return raft::stop;
         }
 

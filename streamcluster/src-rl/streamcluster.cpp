@@ -1027,9 +1027,9 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
       points.p[i].weight = 1.0;
     }
     */
-    switch_membership = (bool*)malloc(points.num*sizeof(bool));
-    is_center = (bool*)calloc(points.num,sizeof(bool));
-    center_table = (int*)malloc(points.num*sizeof(int));
+    //switch_membership = (bool*)malloc(points.num*sizeof(bool));
+    //is_center = (bool*)calloc(points.num,sizeof(bool));
+    //center_table = (int*)malloc(points.num*sizeof(int));
 
 
     //fprintf(stderr,"center_table = 0x%08x\n",(int)center_table);
@@ -1037,9 +1037,9 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
 
     //localSearch(&points,kmin, kmax,&kfinal); // parallel
     
-
+    std::cout << "Executing the map" << std::endl;
     m.exe();
-
+    std::cout << "Done with execution" << std::endl;
 
     //fprintf(stderr,"finish local search\n");
     contcenters(&points); /* sequential */
@@ -1053,9 +1053,9 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
     //IDoffset += numRead;
     //IDoffset += 0;
 
-    free(is_center);
-    free(switch_membership);
-    free(center_table);
+    //free(is_center);
+    //free(switch_membership);
+    //free(center_table);
 
     //if( stream->feof() ) {
     //  break;
@@ -1063,11 +1063,12 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
   }
 
   //finally cluster all temp centers
-  switch_membership = (bool*)malloc(centers.num*sizeof(bool));
-  is_center = (bool*)calloc(centers.num,sizeof(bool));
-  center_table = (int*)malloc(centers.num*sizeof(int));
+  //switch_membership = (bool*)malloc(centers.num*sizeof(bool));
+  //is_center = (bool*)calloc(centers.num,sizeof(bool));
+  //center_table = (int*)malloc(centers.num*sizeof(int));
 
   //localSearch( &centers, kmin, kmax ,&kfinal ); // parallel
+  std::cout << "Performing final execution of map" << std::endl;
   m.exe();
   contcenters(&centers);
   outcenterIDs( &centers, centerIDs, outfile);
