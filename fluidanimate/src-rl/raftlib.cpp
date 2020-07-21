@@ -669,7 +669,7 @@ void InitDensitiesAndForcesMT(int tid)
     for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
       for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
       {
-                    int index = (iz*ny + iy)*nx + ix;
+        int index = (iz*ny + iy)*nx + ix;
         Cell *cell = &cells[index];
         int np = cnumPars[index];
         for(int j = 0; j < np; ++j)

@@ -97,6 +97,45 @@ public:
     }
 };
 
+struct RebuildGridMTAccumulator_Input
+{
+    int ck;
+    int cj;
+    int ci;
+    int tid;
+
+    RebuildGridMTAccumulator_Input() : ck(0), cj(0), ci(0), tid(0) {}
+    RebuildGridMTAccumulator_Input(int ck, int cj, int ci, int tid) : ck(ck), cj(cj), ci(ci), tid(tid) {}
+};
+
+class RebuildGridMTAccumulator : public raft::kernel
+{
+private:
+    Grid* g_Grids;
+    Cell* g_Cells;
+    Cell** g_last_cells;
+    cellpool* g_Pools;
+    int* g_cnumPars;
+    int g_ny;
+    int g_nx;
+public:
+    RebuildGridMTAccumulator(Grid* grids, Cell* cells, Cell** last_cells, int* cnumPars, int ny, int nx, cellpool* pools)
+        : g_Grids(grids), g_Cells(cells), g_last_cells(last_cells), g_cnumPars(cnumPars), g_ny(ny), g_nx(nx), g_Pools(pools)
+    {
+        input.addPort<int>("in");
+        output.addPort<int>("out");
+    }
+
+    virtual raft::kstatus run()
+    {
+        int tid = input["in"].peek<int>();
+
+        
+
+        return raft::proceed;
+    }
+};
+
 class InitDensitiesAndForcesMTKernel : public raft::kernel
 {
 private:
