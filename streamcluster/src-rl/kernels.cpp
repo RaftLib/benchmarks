@@ -210,133 +210,118 @@ raft::kstatus PKMedianAccumulator1::run()
 PSpeedyCallManager::PSpeedyCallManager(unsigned int threadCount, long kmin, unsigned int SP) : raft::kernel(), m_ThreadCount(threadCount), m_kMin(kmin), m_SP(SP)
 {
     // This input will come from whatever function calls pspeedy (should be pkmedian)
-    input.addPort<PSpeedyCallManager_Input>("in_main");
-
-    // These inputs and outputs represent the FIFOs for communication with the worker threads
-    // This structure is necessary because every iteration that pspeedy runs internally, 
-    // the data is potentially updated which influences the next iteration decision-making.
-    for (auto i = 0; i < m_ThreadCount; i++)
-    {
-        // The input will the cost total of each of the worker threads
-        // This will not always be used, but it is very little extra computation to total this each time the thread runs
-        input.addPort<double>(std::to_string(i).c_str());
-
-        // The output will command the worker threads
-        output.addPort<PSpeedyWorker_Input>(std::to_string(i).c_str());
-    }
+    input.addPort<PSpeedyCallManager_Input>("input");
 
     // This is the result of the pspeedy function operation
-    output.addPort<PSpeedyCallManager_Output>("cost");
+    output.addPort<PSpeedyCallManager_Output>("output");
 }
 
 raft::kstatus PSpeedyCallManager::run()
 {
     std::cout << "Executing PSpeedyCallManager run" << std::endl;
-    if (input["in_main"].size() > 0)
+    
+    // This code runs when PSpeedyCallManager is given data from the call in pkmedian 
+    // Should only be called once per iteration
+    PSpeedyCallManager_Input inputData = input["input"].peek<PSpeedyCallManager_Input>();
+    unsigned int iterationIndex = 0;
+    unsigned int pSpeedyExecutionCount = 0;
+
+    double totalCost = 0.0;
+
+    // Do the initial points shuffle
+    shuffle(inputData.points);
+
+    // Command the worker threads (the first point is guaranteed to be a center)
+    PSpeedyWorkerProducer producer1(inputData.points, inputData.numRead, true, iterationIndex, m_ThreadCount);
+    PSpeedyWorker workers1[m_ThreadCount];
+    PSpeedyWorkerConsumer consumer1(&totalCost, m_ThreadCount);
+    raft::map m1;
+
+    for (auto i = 0; i < m_ThreadCount; i++)
+        m1 += producer1[std::to_string(i).c_str()] >> workers1[i] >> consumer1[std::to_string(i).c_str()];
+
+    m1.exe();
+    iterationIndex++;
+    *(inputData.kCenter) = 1;
+
+    bool shouldContinue = true;
+
+    while (shouldContinue)
     {
-        std::cout << "PSpeedy called (from pkmedian)" << std::endl;
-        // This code runs when PSpeedyCallManager is given data from the call in pkmedian 
-        // Should only be called once per iteration
-        PSpeedyCallManager_Input inputData = input["in_main"].peek<PSpeedyCallManager_Input>();
-        m_Points = inputData.points;
-        m_IterationIndex = 0;
-        m_NumRead = inputData.numRead;
-        m_Z = inputData.z;
-        m_kCenter = inputData.kCenter;
-        m_PSpeedyExecutionCount = 0;
-        m_Hiz = inputData.hiz;
-        m_Loz = inputData.loz;
-
-        // Do the initial points shuffle
-        shuffle(m_Points);
-
-        // Command the worker threads (the first point is guaranteed to be a center)
-        for (auto i = 0; i < m_ThreadCount; i++)
-            output[std::to_string(i).c_str()].push<PSpeedyWorker_Input>(PSpeedyWorker_Input(m_Points, i, m_NumRead / m_ThreadCount, m_IterationIndex, m_NumRead, true));
-
-        input["in_main"].recycle();
-        m_IterationIndex++;
-        *m_kCenter = 1;
-
-        return raft::proceed;
-    }
-    else
-    {
-        // We need to wait for all of the worker threads to finish before executing
-        bool allThreadsFinished = true;
-        for (auto i = 0; i < m_ThreadCount; i++)
-        {
-            if (input[std::to_string(i).c_str()].size() < 1)
-            {
-                allThreadsFinished = false;
-            }
-        }
-        if (!allThreadsFinished)
-            return raft::proceed;
-
         // Checks that take care of the 3 function calls of pspeedy
-        if (m_IterationIndex >= m_NumRead)
+        if (iterationIndex >= inputData.numRead)
         {
             // At this point, an entire function call of "pspeedy" has been completed
             // Now, we need to decide whether to perform another based upon the values of kCenter, kmin, and SP
-            m_PSpeedyExecutionCount++;
+            pSpeedyExecutionCount++;
             std::cout << "One execution of PSpeedy completed" << std::endl;
             
-            if ((*m_kCenter < m_kMin) && (m_PSpeedyExecutionCount < m_SP + 1))
+            if ((*(inputData.kCenter) < m_kMin) && (pSpeedyExecutionCount < m_SP + 1))
             {
                 // At this point, we are giving pspeedy SP chances to get at least kmin/2 facilities
                 // Perform pspeedy again like we just restarted
-                m_IterationIndex = 0;
-                *m_kCenter = 1;
+                iterationIndex = 0;
+                *(inputData.kCenter) = 1;
             }
-            else if (*m_kCenter < m_kMin)
+            else if (*(inputData.kCenter) < m_kMin)
             {
                 // At this point, we are now assuming that z is too high and will decrease its value for each new call of pspeedy
-                m_IterationIndex = 0;
-                shuffle(m_Points);
-                *m_Hiz = *m_Z;
-                *m_Z = (*m_Hiz + *m_Loz) / 2.0;
-                m_PSpeedyExecutionCount = 0;
-                *m_kCenter = 1;
+                iterationIndex = 0;
+                shuffle(inputData.points);
+                *(inputData.hiz) = *(inputData.z);
+                *(inputData.z) = (*(inputData.hiz) + *(inputData.loz)) / 2.0;
+                pSpeedyExecutionCount = 0;
+                *(inputData.kCenter) = 1;
             }
+            else
+                shouldContinue = false;
         }
 
-        if (m_IterationIndex < m_NumRead)
+        while (iterationIndex < inputData.numRead)
         {
             // We will try to pick another center
-            bool to_open = ((float) lrand48() / (float) INT_MAX) < (m_Points->p[m_IterationIndex].cost / *m_Z);
+            bool to_open = ((float) lrand48() / (float) INT_MAX) < (inputData.points->p[iterationIndex].cost / *(inputData.z));
             if (to_open)
-                (*m_kCenter)++;
+                (*(inputData.kCenter))++;
             
             // Command the worker threads (they will not do any operations if to_open is false)
-            for (auto i = 0; i < m_ThreadCount; i++)
-                output[std::to_string(i).c_str()].push<PSpeedyWorker_Input>(PSpeedyWorker_Input(m_Points, i, m_NumRead / m_ThreadCount, m_IterationIndex, m_NumRead, to_open));
+            PSpeedyWorkerProducer producer(inputData.points, inputData.numRead, to_open, iterationIndex, m_ThreadCount);
+            PSpeedyWorker workers[m_ThreadCount];
+            PSpeedyWorkerConsumer consumer(&totalCost, m_ThreadCount);
+            raft::map m;
 
-            m_IterationIndex++;
+            for (auto i = 0; i < m_ThreadCount; i++)
+                m1 += producer[std::to_string(i).c_str()] >> workers[i] >> consumer[std::to_string(i).c_str()];
+
+            m.exe();
+            iterationIndex++;
         }
-        else
-        {
-            // We are done picking centers, sum the costs (with the starting value) and then "return"
-            double totalCost = *m_Z * *m_kCenter;
-            for (auto i = 0; i < m_ThreadCount; i++)
-                totalCost += input[std::to_string(i).c_str()].peek<double>();
-
-            // Cleanup
-            for (auto i = 0; i < m_ThreadCount; i++)
-                input[std::to_string(i).c_str()].recycle();
-
-            // Push our output
-            output["cost"].push<PSpeedyCallManager_Output>(PSpeedyCallManager_Output(m_Points, m_NumRead, m_Z, m_kCenter, totalCost, m_Hiz, m_Loz));
-            
-            return raft::proceed;
-        }
-
-        // Cleanup
-        for (auto i = 0; i < m_ThreadCount; i++)
-            input[std::to_string(i).c_str()].recycle();
-
-        return raft::proceed;
     }
+
+    // We are done picking centers, totalCost has the summed cost but we need to add a value onto it first
+    totalCost += *(inputData.z) * *(inputData.kCenter);
+
+    input["input"].recycle();
+
+    // Push our output
+    output["output"].push<PSpeedyCallManager_Output>(PSpeedyCallManager_Output(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, totalCost, inputData.hiz, inputData.loz));
+    
+    return raft::proceed;
+}
+
+PSpeedyWorkerProducer::PSpeedyWorkerProducer(Points* points, size_t numRead, bool work, unsigned int iterationIndex, unsigned int threadCount)
+    : raft::kernel(), m_Points(points), m_NumRead(numRead), m_ThreadCount(threadCount), m_Work(work), m_IterationIndex(iterationIndex)
+{
+    for (auto i = 0; i < m_ThreadCount; i++)
+        output.addPort<PSpeedyWorker_Input>(std::to_string(i).c_str());
+}
+
+raft::kstatus PSpeedyWorkerProducer::run()
+{
+    for (auto i = 0; i < m_ThreadCount; i++)
+        output[std::to_string(i).c_str()].push<PSpeedyWorker_Input>(PSpeedyWorker_Input(m_Points, m_NumRead, i, m_NumRead/m_ThreadCount, m_IterationIndex, m_Work));
+
+    return raft::stop;
 }
 
 PSpeedyWorker::PSpeedyWorker() : raft::kernel()
@@ -375,11 +360,30 @@ raft::kstatus PSpeedyWorker::run()
     for (auto k = k1; k < k2; k++)
         cost += points->p[k].cost;
 
-    // Push the cost calculate from this worker's points
+    // Push the cost calculated from this worker's points
     output["output"].push<double>(cost);    
 
     // Cleanup
     input["input"].recycle();
+
+    return raft::proceed;
+}
+
+PSpeedyWorkerConsumer::PSpeedyWorkerConsumer(double* cost, unsigned int threadCount)
+    : raft::kernel_all(), m_ThreadCount(threadCount), m_Cost(cost)
+{
+    for (auto i = 0; i < m_ThreadCount; i++)
+        input.addPort<double>(std::to_string(i).c_str());
+}
+
+raft::kstatus PSpeedyWorkerConsumer::run()
+{
+    *m_Cost = 0.0;
+    for (auto i = 0; i < m_ThreadCount; i++)
+    {
+        *m_Cost += input[std::to_string(i).c_str()].peek<double>();
+        input[std::to_string(i).c_str()].recycle();
+    }
 
     return raft::proceed;
 }

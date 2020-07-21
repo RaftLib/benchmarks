@@ -127,25 +127,30 @@ struct PSpeedyWorker_Input
     bool work;
 
     PSpeedyWorker_Input() : points(nullptr), tid(0), work(false), blockSize(0), numRead(0), iterationIndex(0) {}
-    PSpeedyWorker_Input(Points* points, unsigned int tid, unsigned int blockSize, unsigned int iterationIndex, size_t numRead, bool work) : points(points), tid(tid), work(work), blockSize(blockSize), numRead(numRead), iterationIndex(iterationIndex) {}
+    PSpeedyWorker_Input(Points* points, size_t numRead, unsigned int tid, unsigned int blockSize, unsigned int iterationIndex, bool work) : points(points), numRead(numRead), tid(tid), work(work), blockSize(blockSize), iterationIndex(iterationIndex) {}
 };
 
 class PSpeedyCallManager : public raft::kernel
 {
 private:
-    Points* m_Points;
-    size_t m_NumRead;
     long m_kMin;
     unsigned int m_SP;
-    double* m_Z;
-    double* m_Hiz;
-    double* m_Loz;
-    long* m_kCenter;
     unsigned int m_ThreadCount;
-    unsigned int m_IterationIndex;
-    unsigned int m_PSpeedyExecutionCount;
 public:
     PSpeedyCallManager(unsigned int threadCount, long kmin, unsigned int SP);
+    virtual raft::kstatus run();
+};
+
+class PSpeedyWorkerProducer : public raft::kernel
+{
+private:
+    Points* m_Points;
+    size_t m_NumRead;
+    unsigned int m_ThreadCount;
+    unsigned int m_IterationIndex;
+    bool m_Work;
+public:
+    PSpeedyWorkerProducer(Points* points, size_t numRead, bool work, unsigned int iterationIndex, unsigned int threadCount);
     virtual raft::kstatus run();
 };
 
@@ -153,6 +158,16 @@ class PSpeedyWorker : public raft::kernel
 {
 public:
     PSpeedyWorker();
+    virtual raft::kstatus run();
+};
+
+class PSpeedyWorkerConsumer : public raft::kernel_all
+{
+private:
+    double* m_Cost;
+    unsigned int m_ThreadCount;
+public:
+    PSpeedyWorkerConsumer(double* cost, unsigned int threadCount);
     virtual raft::kstatus run();
 };
 
