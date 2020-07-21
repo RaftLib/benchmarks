@@ -940,6 +940,7 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
 
   bool shouldContinue = true;
   // Kernel Initialization
+  StreamClusterStarterKernel starter;
   PStreamReader streamReader(stream, block, dim, chunksize, &shouldContinue, &IDoffset);
   LocalSearchStarter localSearchStarter(&points, &centers, nproc, isCenter, centerTable, switchMembership);
   std::vector<PKMedianWorker1*> pkMedianWorkers;
@@ -960,6 +961,9 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
   PGainAccumulator5 pGainAccumulator5(nproc);
   PFLCallManager pFLCallManager;
   PKMedianAccumulator2 pkMedianAccumulator2(kmin, kmax, &kfinal, ITER, isCenter, centerTable, switchMembership);
+  ContCentersKernel contCenters(&points, &centers);
+  CopyCentersKernel copyCenters(&points, &centers, centerIDs, &IDoffset);
+  OutCenterIDsKernel outCenters(&centers, centerIDs, outfile);
   raft::map m;
 
   for (auto i = 0; i < nproc; i++)
@@ -974,6 +978,7 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
   }
 
   // Map Construction
+  m += starter >> streamReader["input_start"];
   m += streamReader >> localSearchStarter;
   m += pkMedianAccumulator1 >> pSpeedyCallManager["in_main"];
   m += selectFeasible >> pkMedianAccumulator2["input_main"];
@@ -982,6 +987,11 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
   m += pGainAccumulator5 >> pFLCallManager["input_change"];
   m += pFLCallManager["output_cost"] >> pkMedianAccumulator2["input_pfl"];
   m += pSpeedyCallManager["cost"] >> selectFeasible;
+  m += pkMedianAccumulator2["output_end"] >> contCenters;
+  m += contCenters["output_copy"] >> copyCenters;
+  m += contCenters["output_out"] >> outCenters;
+  m += copyCenters >> streamReader["input_continue"];
+ 
 
   for (auto i = 0; i < nproc; i++)
   {
@@ -1002,8 +1012,8 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
     m += *(pGainWorker5s[i]) >> pGainAccumulator5[to_str];
   }
 
-  while (shouldContinue)
-  {
+  //while (shouldContinue)
+  //{
   //while(1) 
   //{
 
@@ -1037,19 +1047,19 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
 
     //localSearch(&points,kmin, kmax,&kfinal); // parallel
     
-    std::cout << "Executing the map" << std::endl;
-    m.exe();
-    std::cout << "Done with execution" << std::endl;
+    //std::cout << "Executing the map" << std::endl;
+    //m.exe();
+    //std::cout << "Done with execution" << std::endl;
 
     //fprintf(stderr,"finish local search\n");
-    contcenters(&points); /* sequential */
-    if( kfinal + centers.num > centersize ) {
+    //contcenters(&points); /* sequential */
+    //if( kfinal + centers.num > centersize ) {
       //here we don't handle the situation where # of centers gets too large. 
-      fprintf(stderr,"oops! no more space for centers\n");
-      exit(1);
-    }
+      //fprintf(stderr,"oops! no more space for centers\n");
+      //exit(1);
+    //}
 
-    copycenters(&points, &centers, centerIDs, IDoffset); /* sequential */
+    //copycenters(&points, &centers, centerIDs, IDoffset); /* sequential */
     //IDoffset += numRead;
     //IDoffset += 0;
 
@@ -1060,7 +1070,7 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
     //if( stream->feof() ) {
     //  break;
     //}
-  }
+  //}
 
   //finally cluster all temp centers
   //switch_membership = (bool*)malloc(centers.num*sizeof(bool));
@@ -1068,10 +1078,12 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
   //center_table = (int*)malloc(centers.num*sizeof(int));
 
   //localSearch( &centers, kmin, kmax ,&kfinal ); // parallel
-  std::cout << "Performing final execution of map" << std::endl;
+  //std::cout << "Performing final execution of map" << std::endl;
+  //m.exe();
+  //contcenters(&centers);
+  //outcenterIDs( &centers, centerIDs, outfile);
+
   m.exe();
-  contcenters(&centers);
-  outcenterIDs( &centers, centerIDs, outfile);
 
   for (auto i = 0; i < nproc; i++)
   {

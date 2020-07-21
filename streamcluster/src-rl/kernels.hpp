@@ -4,6 +4,13 @@
 #include "streamcluster.hpp"
 #include <raft>
 
+class StreamClusterStarterKernel : public raft::kernel
+{
+public:
+    StreamClusterStarterKernel();
+    virtual raft::kstatus run();
+};
+
 struct PStreamReader_Output
 {
     size_t numRead;
@@ -434,5 +441,45 @@ public:
     virtual raft::kstatus run();
 };
 
+struct ContCentersKernel_Input
+{
+    size_t numRead;
+    Points* points;
+
+    ContCentersKernel_Input() : numRead(0), points(nullptr) {}
+    ContCentersKernel_Input(size_t numRead, Points* points) : numRead(numRead), points(points) {}
+};
+
+class ContCentersKernel : public raft::kernel
+{
+    Points* m_Points;
+    Points* m_Centers;
+public:
+    ContCentersKernel(Points* points, Points* centers);
+    virtual raft::kstatus run();
+};
+
+class CopyCentersKernel : public raft::kernel
+{
+private:
+    Points* m_Points;
+    Points* m_Centers;
+    long* m_CenterIDs;
+    long* m_Offset;
+public:
+    CopyCentersKernel(Points* points, Points* centers, long* centerIDs, long* offset);
+    virtual raft::kstatus run();
+};
+
+class OutCenterIDsKernel : public raft::kernel
+{
+private:
+    Points* m_Centers;
+    long* m_CenterIDs;
+    char* m_Outfile;
+public:
+    OutCenterIDsKernel(Points* centers, long* centerIDs, char* outfile);
+    virtual raft::kstatus run();
+};
 
 #endif

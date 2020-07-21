@@ -1,15 +1,36 @@
 #include "kernels.hpp"
 
+StreamClusterStarterKernel::StreamClusterStarterKernel() : raft::kernel() 
+{
+    output.addPort<int>("output");
+}
+
+raft::kstatus StreamClusterStarterKernel::run()
+{
+    output["output"].push<int>(1);
+    return raft::stop;
+}
+
 PStreamReader::PStreamReader(PStream* stream, float* block, int dim, long chunkSize, bool* shouldContinue, long* IDoffset)
     : raft::kernel(), m_Stream(stream), m_Block(block), m_Dim(dim), m_ChunkSize(chunkSize), m_Continue(shouldContinue), m_IDoffset(IDoffset)
 {
+    input.addPort<int>("input_start");
+
+    input.addPort<size_t>("input_continue");
+
     // Create our output port
     output.addPort<PStreamReader_Output>("output");
+
     *m_Continue = true;
 }
 
 raft::kstatus PStreamReader::run()
 {
+    if (input["input_start"].size() > 0)
+        input["input_start"].recycle();
+    else
+        input["input_continue"].recycle();
+    
     size_t numRead = 0;
     std::cout << "Executing PStreamReader run" << std::endl;
     if (*m_Continue)
@@ -27,6 +48,7 @@ raft::kstatus PStreamReader::run()
 
     // Push our output data
     output["output"].push<PStreamReader_Output>(PStreamReader_Output(numRead, !*m_Continue));
+
     *m_IDoffset += numRead;
 
     // If we've reached the end of the stream, alert the while loop
@@ -979,6 +1001,7 @@ PKMedianAccumulator2::PKMedianAccumulator2(long kmin, long kmax, long* kfinal, u
 
     // This is the cost output of pkMedian
     //output.addPort<double>("output_cost"); (not used currently)
+    output.addPort<ContCentersKernel_Input>("output_end");
 }
 
 raft::kstatus PKMedianAccumulator2::run()
@@ -1054,7 +1077,7 @@ raft::kstatus PKMedianAccumulator2::run()
             delete[] *m_CenterTable;
 
             //output["output_cost"].push<double>(m_Cost); cost is not actually used after this
-            std::cout << "We are done!" << std::endl;
+            output["output_end"].push<ContCentersKernel_Input>(ContCentersKernel_Input(m_NumRead, m_Points));
             return raft::stop;
         }
 
@@ -1062,3 +1085,118 @@ raft::kstatus PKMedianAccumulator2::run()
     return raft::proceed;
 }
 
+ContCentersKernel::ContCentersKernel(Points* points, Points* centers) : raft::kernel(), m_Points(points), m_Centers(centers)
+{
+    input.addPort<ContCentersKernel_Input>("input");
+    output.addPort<size_t>("output_copy");
+    output.addPort<size_t>("output_out");
+}
+
+raft::kstatus ContCentersKernel::run()
+{
+    ContCentersKernel_Input inputData = input["input"].peek<ContCentersKernel_Input>();
+    size_t numRead = inputData.numRead;
+    Points* points = inputData.points;
+    if (points == m_Centers)
+        numRead = m_Centers->num;
+
+    float relweight = 0.0;
+    for (auto i = 0; i < numRead; i++)
+    {
+        if (points->p[i].assign != i)
+        {
+            relweight = points->p[points->p[i].assign].weight + points->p[i].weight;
+            relweight = points->p[i].weight / relweight;
+            for (auto ii = 0; ii < points->dim; ii++)
+            {
+                points->p[points->p[i].assign].coord[ii] *= 1.0 - relweight;
+                points->p[points->p[i].assign].coord[ii] += points->p[i].coord[ii] * relweight;
+            }
+            points->p[points->p[i].assign].weight += points->p[i].weight;
+        }
+    }
+
+    if (points == m_Points)
+        output["output_copy"].push<size_t>(numRead);
+    else
+        output["output_out"].push<size_t>(numRead);
+    
+    input["input"].recycle();
+
+    return raft::proceed;
+}
+
+CopyCentersKernel::CopyCentersKernel(Points* points, Points* centers, long* centerIDs, long* offset)
+    : raft::kernel(), m_Points(points), m_Centers(centers), m_CenterIDs(centerIDs), m_Offset(offset)
+{
+    input.addPort<size_t>("input");
+    output.addPort<size_t>("output");
+}
+
+raft::kstatus CopyCentersKernel::run()
+{
+    size_t numRead = input["input"].peek<size_t>();
+
+    bool* is_a_median = new bool[numRead];
+    for (auto i = 0; i < numRead; i++)
+        is_a_median[m_Points->p[i].assign] = 1;
+
+    long k = m_Centers->num;
+
+    for (auto i = 0; i < numRead; i++)
+    {
+        if (is_a_median[i])
+        {
+            memcpy(m_Centers->p[k].coord, m_Points->p[i].coord, m_Points->dim * sizeof(float));
+            m_Centers->p[k].weight = m_Points->p[i].weight;
+            m_CenterIDs[k] = i + *m_Offset;
+            k++;
+        }
+    }
+
+    m_Centers->num = k;
+
+    delete[] is_a_median;
+
+    output["output"].push<size_t>(numRead);
+    input["input"].recycle();
+
+    return raft::proceed;
+}
+
+OutCenterIDsKernel::OutCenterIDsKernel(Points* centers, long* centerIDs, char* outfile)
+    : raft::kernel(), m_Centers(centers), m_CenterIDs(centerIDs), m_Outfile(outfile)
+{
+    input.addPort<size_t>("input");
+}
+
+raft::kstatus OutCenterIDsKernel::run()
+{
+    input["input"].recycle();
+
+    FILE* fp = fopen(m_Outfile, "w");
+    if (!fp)
+    {
+        std::cerr << "Error opening " << m_Outfile << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    int* is_a_median = new int[m_Centers->num];
+    for (auto i = 0; i < m_Centers->num; i++)
+        is_a_median[m_Centers->p[i].assign] = 1;
+
+    for (auto i = 0; i < m_Centers->num; i++)
+    {
+        if (is_a_median[i])
+        {
+            fprintf(fp, "%lu\n", m_CenterIDs[i]);
+            fprintf(fp, "%lf\n", m_Centers->p[i].weight);
+            for (auto k = 0; k < m_Centers->dim; k++)
+                fprintf(fp, "%lf ", m_Centers->p[i].coord[k]);
+            fprintf(fp, "\n\n");
+        }
+    }
+    fclose(fp);
+
+    return raft::stop;
+}
