@@ -980,14 +980,15 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
   // Map Construction
   m += starter >> streamReader["input_start"];
   m += streamReader >> localSearchStarter;
-  m += pkMedianAccumulator1 >> pSpeedyCallManager["in_main"];
+  m += pkMedianAccumulator1["output_pspeedy"] >> pSpeedyCallManager["in_main"];
   m += selectFeasible >> pkMedianAccumulator2["input_main"];
   m += pkMedianAccumulator2["output_pfl"] >> pFLCallManager["input_main"];
   m += pFLCallManager["output_pgain"] >> pGainCallManager;
   m += pGainAccumulator5 >> pFLCallManager["input_change"];
   m += pFLCallManager["output_cost"] >> pkMedianAccumulator2["input_pfl"];
   m += pSpeedyCallManager["cost"] >> selectFeasible;
-  m += pkMedianAccumulator2["output_end"] >> contCenters;
+  m += pkMedianAccumulator2["output_end"] >> contCenters["input_pkmedian2"];
+  m += pkMedianAccumulator1["output_end"] >> contCenters["input_pkmedian1"];
   m += contCenters["output_copy"] >> copyCenters;
   m += contCenters["output_out"] >> outCenters;
   m += copyCenters >> streamReader["input_continue"];
