@@ -1,45 +1,15 @@
 #include "kernels.hpp"
 #include <limits>
 
-StreamClusterStarterKernel::StreamClusterStarterKernel() : raft::kernel() 
-{
-    output.addPort<int>("output");
-}
-
-raft::kstatus StreamClusterStarterKernel::run()
-{
-    output["output"].push<int>(1);
-    return raft::stop;
-}
-
 PStreamReader::PStreamReader(PStream* stream, float* block, int dim, long chunkSize, bool* shouldContinue, long* IDoffset)
     : raft::kernel(), m_Stream(stream), m_Block(block), m_Dim(dim), m_ChunkSize(chunkSize), m_Continue(shouldContinue), m_IDoffset(IDoffset)
 {
-    input.addPort<int>("input_start");
-
-    input.addPort<size_t>("input_continue");
-
-    input.addPort<int>("input_end");
-
     // Create our output port
     output.addPort<PStreamReader_Output>("output");
-
-    *m_Continue = true;
 }
 
 raft::kstatus PStreamReader::run()
 {
-    if (input["input_end"].size() > 0)
-    {
-        input["input_end"].recycle();
-        return raft::stop;
-    }
-
-    if (input["input_start"].size() > 0)
-        input["input_start"].recycle();
-    else
-        input["input_continue"].recycle();
-    
     size_t numRead = 0;
     std::cout << "Executing PStreamReader run" << std::endl;
     if (*m_Continue)
@@ -64,7 +34,7 @@ raft::kstatus PStreamReader::run()
     if (m_Stream->feof())
         *m_Continue = false;
 
-    return raft::proceed;
+    return raft::stop;
 }
 
 LocalSearchStarter::LocalSearchStarter(Points* points, Points* centers, unsigned int threadCount, bool** isCenter, int** centerTable, bool** switchMembership)
@@ -1195,7 +1165,6 @@ CopyCentersKernel::CopyCentersKernel(Points* points, Points* centers, long* cent
     : raft::kernel(), m_Points(points), m_Centers(centers), m_CenterIDs(centerIDs), m_Offset(offset)
 {
     input.addPort<size_t>("input");
-    output.addPort<size_t>("output");
 }
 
 raft::kstatus CopyCentersKernel::run()
@@ -1227,7 +1196,6 @@ raft::kstatus CopyCentersKernel::run()
 
     delete[] is_a_median;
 
-    output["output"].push<size_t>(numRead);
     input["input"].recycle();
 
     std::cout << "Done copying centers" << std::endl;
@@ -1239,7 +1207,6 @@ OutCenterIDsKernel::OutCenterIDsKernel(Points* centers, long* centerIDs, char* o
     : raft::kernel(), m_Centers(centers), m_CenterIDs(centerIDs), m_Outfile(outfile)
 {
     input.addPort<size_t>("input");
-    output.addPort<int>("output");
 }
 
 raft::kstatus OutCenterIDsKernel::run()
@@ -1276,8 +1243,6 @@ raft::kstatus OutCenterIDsKernel::run()
     fclose(fp);
 
     std::cout << "Done!" << std::endl;
-    output["output"].push<int>(0);
-
     delete[] is_a_median;
 
     return raft::stop;

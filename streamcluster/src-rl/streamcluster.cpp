@@ -942,119 +942,50 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
   long kfinal = 0;
 
   bool shouldContinue = true;
-  // Kernel Initialization
-  StreamClusterStarterKernel starter;
-  PStreamReader streamReader(stream, block, dim, chunksize, &shouldContinue, &IDoffset);
-  LocalSearchStarter localSearchStarter(&points, &centers, nproc, isCenter, centerTable, switchMembership);
-  std::vector<PKMedianWorker1*> pkMedianWorkers;
-  PKMedianAccumulator1 pkMedianAccumulator1(kmin, kmax, &kfinal, nproc);
-  PSpeedyCallManager pSpeedyCallManager(nproc, kmin, SP);
-  SelectFeasible_FastKernel selectFeasible(kmin, ITER, isCenter);
-  PKMedianAccumulator2 pkMedianAccumulator2(CACHE_LINE, kmin, kmax, &kfinal, ITER, isCenter, centerTable, switchMembership, nproc);
-  ContCentersKernel contCenters(&points, &centers, &kfinal, centersize);
-  CopyCentersKernel copyCenters(&points, &centers, centerIDs, &IDoffset);
-  OutCenterIDsKernel outCenters(&centers, centerIDs, outfile);
-  raft::map m;
-
-  for (auto i = 0; i < nproc; i++)
-    pkMedianWorkers.push_back(new PKMedianWorker1);
-
-  // Map Construction
-  m += starter >> streamReader["input_start"];
-  m += streamReader >> localSearchStarter;
-  m += pkMedianAccumulator1["output_pspeedy"] >> pSpeedyCallManager;
-  m += pSpeedyCallManager >> selectFeasible;
-  m += selectFeasible >> pkMedianAccumulator2;
-  m += pkMedianAccumulator2 >> contCenters["input_pkmedian2"];
-  m += pkMedianAccumulator1["output_end"] >> contCenters["input_pkmedian1"];
-  m += contCenters["output_copy"] >> copyCenters;
-  m += contCenters["output_out"] >> outCenters;
-  m += copyCenters >> streamReader["input_continue"];
-  m += outCenters >> streamReader["input_end"];
- 
-
-  for (auto i = 0; i < nproc; i++)
+  bool finalIterationDone = false;
+  while (!finalIterationDone)
   {
-    const char* to_str = std::to_string(i).c_str();
-    m += localSearchStarter[to_str] >> *(pkMedianWorkers[i]);
-    m += *(pkMedianWorkers[i]) >> pkMedianAccumulator1[to_str];
+    finalIterationDone = !shouldContinue;    
+
+    // Kernel Initialization
+    PStreamReader streamReader(stream, block, dim, chunksize, &shouldContinue, &IDoffset);
+    LocalSearchStarter localSearchStarter(&points, &centers, nproc, isCenter, centerTable, switchMembership);
+    std::vector<PKMedianWorker1*> pkMedianWorkers;
+    PKMedianAccumulator1 pkMedianAccumulator1(kmin, kmax, &kfinal, nproc);
+    PSpeedyCallManager pSpeedyCallManager(nproc, kmin, SP);
+    SelectFeasible_FastKernel selectFeasible(kmin, ITER, isCenter);
+    PKMedianAccumulator2 pkMedianAccumulator2(CACHE_LINE, kmin, kmax, &kfinal, ITER, isCenter, centerTable, switchMembership, nproc);
+    ContCentersKernel contCenters(&points, &centers, &kfinal, centersize);
+    CopyCentersKernel copyCenters(&points, &centers, centerIDs, &IDoffset);
+    OutCenterIDsKernel outCenters(&centers, centerIDs, outfile);
+    raft::map m;
+
+    for (auto i = 0; i < nproc; i++)
+      pkMedianWorkers.push_back(new PKMedianWorker1);
+
+    // Map Construction
+    m += streamReader >> localSearchStarter;
+    m += pkMedianAccumulator1["output_pspeedy"] >> pSpeedyCallManager;
+    m += pSpeedyCallManager >> selectFeasible;
+    m += selectFeasible >> pkMedianAccumulator2;
+    m += pkMedianAccumulator2 >> contCenters["input_pkmedian2"];
+    m += pkMedianAccumulator1["output_end"] >> contCenters["input_pkmedian1"];
+    m += contCenters["output_copy"] >> copyCenters;
+    m += contCenters["output_out"] >> outCenters;
+  
+
+    for (auto i = 0; i < nproc; i++)
+    {
+      const char* to_str = std::to_string(i).c_str();
+      m += localSearchStarter[to_str] >> *(pkMedianWorkers[i]);
+      m += *(pkMedianWorkers[i]) >> pkMedianAccumulator1[to_str];
+    }
+
+    m.exe();
+
+    for (auto i = 0; i < nproc; i++)
+      delete pkMedianWorkers[i];
   }
-
-  //while (shouldContinue)
-  //{
-  //while(1) 
-  //{
-
-    /**
-     * TODO: figure out a way to set weights
-     *
-     * PIPELINE IDEA
-     * streamread -> setweights -> localsearch
-     */
-    /*
-    size_t numRead  = stream->read(block, dim, chunksize ); 
-    fprintf(stderr,"read %d points\n",numRead);
-
-    if( stream->ferror() || numRead < (unsigned int)chunksize && !stream->feof() ) {
-      fprintf(stderr, "error reading data!\n");
-      exit(1);
-    }
-
-    points.num = numRead;
-    for( int i = 0; i < points.num; i++ ) {
-      points.p[i].weight = 1.0;
-    }
-    */
-    //switch_membership = (bool*)malloc(points.num*sizeof(bool));
-    //is_center = (bool*)calloc(points.num,sizeof(bool));
-    //center_table = (int*)malloc(points.num*sizeof(int));
-
-
-    //fprintf(stderr,"center_table = 0x%08x\n",(int)center_table);
-    //fprintf(stderr,"is_center = 0x%08x\n",(int)is_center);
-
-    //localSearch(&points,kmin, kmax,&kfinal); // parallel
-    
-    //std::cout << "Executing the map" << std::endl;
-    //m.exe();
-    //std::cout << "Done with execution" << std::endl;
-
-    //fprintf(stderr,"finish local search\n");
-    //contcenters(&points); /* sequential */
-    //if( kfinal + centers.num > centersize ) {
-      //here we don't handle the situation where # of centers gets too large. 
-      //fprintf(stderr,"oops! no more space for centers\n");
-      //exit(1);
-    //}
-
-    //copycenters(&points, &centers, centerIDs, IDoffset); /* sequential */
-    //IDoffset += numRead;
-    //IDoffset += 0;
-
-    //free(is_center);
-    //free(switch_membership);
-    //free(center_table);
-
-    //if( stream->feof() ) {
-    //  break;
-    //}
-  //}
-
-  //finally cluster all temp centers
-  //switch_membership = (bool*)malloc(centers.num*sizeof(bool));
-  //is_center = (bool*)calloc(centers.num,sizeof(bool));
-  //center_table = (int*)malloc(centers.num*sizeof(int));
-
-  //localSearch( &centers, kmin, kmax ,&kfinal ); // parallel
-  //std::cout << "Performing final execution of map" << std::endl;
-  //m.exe();
-  //contcenters(&centers);
-  //outcenterIDs( &centers, centerIDs, outfile);
-
-  m.exe();
-
-  for (auto i = 0; i < nproc; i++)
-    delete pkMedianWorkers[i];
 }
 
 int main(int argc, char **argv)

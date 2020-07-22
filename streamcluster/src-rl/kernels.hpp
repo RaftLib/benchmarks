@@ -4,13 +4,6 @@
 #include "streamcluster.hpp"
 #include <raft>
 
-class StreamClusterStarterKernel : public raft::kernel
-{
-public:
-    StreamClusterStarterKernel();
-    virtual raft::kstatus run();
-};
-
 struct PStreamReader_Output
 {
     size_t numRead;
