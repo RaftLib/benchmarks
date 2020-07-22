@@ -946,52 +946,28 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
   std::vector<PKMedianWorker1*> pkMedianWorkers;
   PKMedianAccumulator1 pkMedianAccumulator1(kmin, kmax, &kfinal, nproc);
   PSpeedyCallManager pSpeedyCallManager(nproc, kmin, SP);
-  std::vector<PSpeedyWorker*> pSpeedyWorkers;
   SelectFeasible_FastKernel selectFeasible(kmin, ITER, isCenter);
-  PGainCallManager pGainCallManager(CACHE_LINE, nproc);
-  std::vector<PGainWorker1*> pGainWorker1s;
-  PGainAccumulator1 pGainAccumulator1(nproc);
-  std::vector<PGainWorker2*> pGainWorker2s;
-  PGainAccumulator2 pGainAccumulator2(nproc);
-  std::vector<PGainWorker3*> pGainWorker3s;
-  PGainAccumulator3 pGainAccumulator3(nproc);
-  std::vector<PGainWorker4*> pGainWorker4s;
-  PGainAccumulator4 pGainAccumulator4(nproc);
-  std::vector<PGainWorker5*> pGainWorker5s;
-  PGainAccumulator5 pGainAccumulator5(nproc);
-  PFLCallManager pFLCallManager;
-  PKMedianAccumulator2 pkMedianAccumulator2(kmin, kmax, &kfinal, ITER, isCenter, centerTable, switchMembership);
+  PKMedianAccumulator2 pkMedianAccumulator2(CACHE_LINE, kmin, kmax, &kfinal, ITER, isCenter, centerTable, switchMembership, nproc);
   ContCentersKernel contCenters(&points, &centers);
   CopyCentersKernel copyCenters(&points, &centers, centerIDs, &IDoffset);
   OutCenterIDsKernel outCenters(&centers, centerIDs, outfile);
   raft::map m;
 
   for (auto i = 0; i < nproc; i++)
-  {
     pkMedianWorkers.push_back(new PKMedianWorker1);
-    pSpeedyWorkers.push_back(new PSpeedyWorker);
-    pGainWorker1s.push_back(new PGainWorker1(isCenter, centerTable));
-    pGainWorker2s.push_back(new PGainWorker2(isCenter, centerTable, switchMembership));
-    pGainWorker3s.push_back(new PGainWorker3(isCenter, centerTable, switchMembership, nproc));
-    pGainWorker4s.push_back(new PGainWorker4(isCenter, centerTable, nproc));
-    pGainWorker5s.push_back(new PGainWorker5(isCenter, centerTable, switchMembership));
-  }
 
   // Map Construction
   m += starter >> streamReader["input_start"];
   m += streamReader >> localSearchStarter;
-  m += pkMedianAccumulator1["output_pspeedy"] >> pSpeedyCallManager["in_main"];
-  m += selectFeasible >> pkMedianAccumulator2["input_main"];
-  m += pkMedianAccumulator2["output_pfl"] >> pFLCallManager["input_main"];
-  m += pFLCallManager["output_pgain"] >> pGainCallManager;
-  m += pGainAccumulator5 >> pFLCallManager["input_change"];
-  m += pFLCallManager["output_cost"] >> pkMedianAccumulator2["input_pfl"];
-  m += pSpeedyCallManager["cost"] >> selectFeasible;
-  m += pkMedianAccumulator2["output_end"] >> contCenters["input_pkmedian2"];
+  m += pkMedianAccumulator1["output_pspeedy"] >> pSpeedyCallManager;
+  m += pSpeedyCallManager >> selectFeasible;
+  m += selectFeasible >> pkMedianAccumulator2;
+  m += pkMedianAccumulator2 >> contCenters["input_pkmedian2"];
   m += pkMedianAccumulator1["output_end"] >> contCenters["input_pkmedian1"];
   m += contCenters["output_copy"] >> copyCenters;
   m += contCenters["output_out"] >> outCenters;
   m += copyCenters >> streamReader["input_continue"];
+  m += outCenters >> streamReader["input_end"];
  
 
   for (auto i = 0; i < nproc; i++)
@@ -999,18 +975,6 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
     const char* to_str = std::to_string(i).c_str();
     m += localSearchStarter[to_str] >> *(pkMedianWorkers[i]);
     m += *(pkMedianWorkers[i]) >> pkMedianAccumulator1[to_str];
-    m += pSpeedyCallManager[to_str] >> *(pSpeedyWorkers[i]);
-    m += *(pSpeedyWorkers[i]) >> pSpeedyCallManager[to_str];
-    m += pGainCallManager[to_str] >> *(pGainWorker1s[i]);
-    m += *(pGainWorker1s[i]) >> pGainAccumulator1[to_str];
-    m += pGainAccumulator1[to_str] >> *(pGainWorker2s[i]);
-    m += *(pGainWorker2s[i]) >> pGainAccumulator2[to_str];
-    m += pGainAccumulator2[to_str] >> *(pGainWorker3s[i]);
-    m += *(pGainWorker3s[i]) >> pGainAccumulator3[to_str];
-    m += pGainAccumulator3[to_str] >> *(pGainWorker4s[i]);
-    m += *(pGainWorker4s[i]) >> pGainAccumulator4[to_str];
-    m += pGainAccumulator4[to_str] >> *(pGainWorker5s[i]);
-    m += *(pGainWorker5s[i]) >> pGainAccumulator5[to_str];
   }
 
   //while (shouldContinue)
@@ -1087,19 +1051,7 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
   m.exe();
 
   for (auto i = 0; i < nproc; i++)
-  {
     delete pkMedianWorkers[i];
-    delete pSpeedyWorkers[i];
-    delete pGainWorker1s[i];
-    delete pGainWorker2s[i];
-    delete pGainWorker3s[i];
-    delete pGainWorker4s[i];
-    delete pGainWorker5s[i];
-  }
-
-  delete[] switchMembership;
-  delete[] isCenter;
-  delete[] centerTable;
 }
 
 int main(int argc, char **argv)

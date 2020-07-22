@@ -18,6 +18,8 @@ PStreamReader::PStreamReader(PStream* stream, float* block, int dim, long chunkS
 
     input.addPort<size_t>("input_continue");
 
+    input.addPort<int>("input_end");
+
     // Create our output port
     output.addPort<PStreamReader_Output>("output");
 
@@ -26,6 +28,12 @@ PStreamReader::PStreamReader(PStream* stream, float* block, int dim, long chunkS
 
 raft::kstatus PStreamReader::run()
 {
+    if (input["input_end"].size() > 0)
+    {
+        input["input_end"].recycle();
+        return raft::stop;
+    }
+
     if (input["input_start"].size() > 0)
         input["input_start"].recycle();
     else
@@ -501,7 +509,7 @@ raft::kstatus PGainCallManager::run()
     for (auto i = 0; i < m_ThreadCount; i++)
         output[std::to_string(i).c_str()].push<PGainWorker1_IO>(PGainWorker1_IO(m_InputData.points, m_InputData.numRead, m_InputData.z, m_InputData.kCenter, m_InputData.cost, m_InputData.numFeasible, stride, m_CL, work_mem, i, m_InputData.numRead / m_ThreadCount, m_InputData.x));
 
-    return raft::proceed;
+    return raft::stop;
 }
 
 PGainWorker1::PGainWorker1(bool** is_center, int** center_table) 
@@ -933,7 +941,7 @@ raft::kstatus PFLCallManager::run()
     while (change / cost > 1.0 * m_InputData.e)
     {
         change = 0.0;
-
+        iterationIndex = 0;
         intshuffle(m_InputData.feasible, m_InputData.numFeasible);
 
         while (iterationIndex < m_InputData.iter)
@@ -970,7 +978,6 @@ raft::kstatus PFLCallManager::run()
 
             m.exe();
             change += result;
-
             // pgain has completed
             iterationIndex++;
 
@@ -987,8 +994,7 @@ raft::kstatus PFLCallManager::run()
     }
 
     output["output"].push<double>(cost);
-    input["input"].recycle();
-    return raft::proceed;
+    return raft::stop;
 }
 
 PFLCallConsumer::PFLCallConsumer(double* result)
@@ -1177,6 +1183,8 @@ raft::kstatus CopyCentersKernel::run()
     output["output"].push<size_t>(numRead);
     input["input"].recycle();
 
+    std::cout << "Done copying centers" << std::endl;
+
     return raft::proceed;
 }
 
@@ -1184,6 +1192,7 @@ OutCenterIDsKernel::OutCenterIDsKernel(Points* centers, long* centerIDs, char* o
     : raft::kernel(), m_Centers(centers), m_CenterIDs(centerIDs), m_Outfile(outfile)
 {
     input.addPort<size_t>("input");
+    output.addPort<int>("output");
 }
 
 raft::kstatus OutCenterIDsKernel::run()
@@ -1216,6 +1225,7 @@ raft::kstatus OutCenterIDsKernel::run()
     fclose(fp);
 
     std::cout << "Done!" << std::endl;
+    output["output"].push<int>(0);
 
     return raft::stop;
 }
