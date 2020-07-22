@@ -1,4 +1,5 @@
 #include "kernels.hpp"
+#include <limits>
 
 StreamClusterStarterKernel::StreamClusterStarterKernel() : raft::kernel() 
 {
@@ -176,7 +177,7 @@ raft::kstatus PKMedianAccumulator1::run()
     // Save the input data so we can recycle after reading once
     double* hiz = new double(0.0);
     double* loz = new double(0.0);
-    double* z = new double((*hiz + *loz) / 2.0);
+    double* z = new double(0.0);
     long* kCenter = new long(0);
     Points* points;
     size_t numRead = 0;
@@ -190,6 +191,8 @@ raft::kstatus PKMedianAccumulator1::run()
         *hiz += inputData.hiz;
         input[std::to_string(i).c_str()].recycle();
     }
+
+    *z = (*hiz + *loz) / 2.0;
 
     if (numRead <= m_kMax)
     {
@@ -262,7 +265,6 @@ raft::kstatus PSpeedyCallManager::run()
             // At this point, an entire function call of "pspeedy" has been completed
             // Now, we need to decide whether to perform another based upon the values of kCenter, kmin, and SP
             pSpeedyExecutionCount++;
-            std::cout << "One execution of PSpeedy completed" << std::endl;
             
             if ((*(inputData.kCenter) < m_kMin) && (pSpeedyExecutionCount < m_SP + 1))
             {
@@ -288,9 +290,13 @@ raft::kstatus PSpeedyCallManager::run()
         while (iterationIndex < inputData.numRead)
         {
             // We will try to pick another center
-            bool to_open = ((float) lrand48() / (float) INT_MAX) < (inputData.points->p[iterationIndex].cost / *(inputData.z));
-            if (to_open)
-                (*(inputData.kCenter))++;
+            bool to_open = false;
+            if (iterationIndex != 0)
+            {
+                to_open = ((float) lrand48() / (float) INT_MAX) < (inputData.points->p[iterationIndex].cost / *(inputData.z));
+                if (to_open)
+                    (*(inputData.kCenter))++;
+            }       
             
             // Command the worker threads (they will not do any operations if to_open is false)
             PSpeedyWorkerProducer producer(inputData.points, inputData.numRead, to_open, iterationIndex, m_ThreadCount);
@@ -299,7 +305,7 @@ raft::kstatus PSpeedyCallManager::run()
             raft::map m;
 
             for (auto i = 0; i < m_ThreadCount; i++)
-                m1 += producer[std::to_string(i).c_str()] >> workers[i] >> consumer[std::to_string(i).c_str()];
+                m += producer[std::to_string(i).c_str()] >> workers[i] >> consumer[std::to_string(i).c_str()];
 
             m.exe();
             iterationIndex++;
@@ -310,6 +316,9 @@ raft::kstatus PSpeedyCallManager::run()
     totalCost += *(inputData.z) * *(inputData.kCenter);
 
     input["input"].recycle();
+    
+    std::cout << "KCenters after all PSpeedy: " << *(inputData.kCenter) << std::endl;
+    std::cout << "Cost after all PSpeedy: " << totalCost << std::endl;
 
     // Push our output
     output["output"].push<PSpeedyCallManager_Output>(PSpeedyCallManager_Output(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, totalCost, inputData.hiz, inputData.loz));
@@ -351,7 +360,7 @@ raft::kstatus PSpeedyWorker::run()
     Points* points = inputData.points;
 
     // If a center was opened for this iteration
-    if (inputData.work)
+    if (inputData.work || inputData.iterationIndex == 0)
     {
         for (auto k = k1; k < k2; k++)
         {
