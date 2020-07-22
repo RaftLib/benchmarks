@@ -218,8 +218,9 @@ class PGainCallManager : public raft::kernel
 private:
     unsigned int m_CL;
     unsigned int m_ThreadCount;
+    PGainCallManager_Input m_InputData;
 public:
-    PGainCallManager(unsigned int CACHE_LINE, unsigned int threadCount);
+    PGainCallManager(unsigned int CACHE_LINE, unsigned int threadCount, PGainCallManager_Input inputData);
     virtual raft::kstatus run();
 };
 
@@ -387,9 +388,10 @@ public:
 class PGainAccumulator5 : public raft::kernel_all
 {
 private:
+    double* m_Result;
     unsigned int m_ThreadCount;
 public:
-    PGainAccumulator5(unsigned int threadCount);
+    PGainAccumulator5(double* result, unsigned int threadCount);
     virtual raft::kstatus run();
 };
 
@@ -412,20 +414,23 @@ struct PFLCallManager_Input
 class PFLCallManager : public raft::kernel
 {
 private:
-    Points* m_Points;
-    size_t m_NumRead;
-    double* m_Z;
-    long* m_kCenter;
-    long m_Iter;
-    int* m_Feasible;
-    int m_NumFeasible;
-    double m_Change;
-    double m_Cost;
-    float m_E;
-
-    unsigned int m_IterationIndex;
+    unsigned int m_CL;
+    bool** m_IsCenter;
+    int** m_CenterTable;
+    bool** m_SwitchMembership;
+    unsigned int m_ThreadCount;
+    PFLCallManager_Input m_InputData;
 public:
-    PFLCallManager();
+    PFLCallManager(unsigned int CL, bool** isCenter, bool** switchMembership, int** centerTable, unsigned int threadCount, PFLCallManager_Input inputData);
+    virtual raft::kstatus run();
+};
+
+class PFLCallConsumer : public raft::kernel
+{
+private:
+    double* m_Result;
+public:
+    PFLCallConsumer(double* result);
     virtual raft::kstatus run();
 };
 
@@ -435,24 +440,14 @@ private:
     long m_kMin;
     long m_kMax;
     long* m_kFinal;
-    Points* m_Points;
-    size_t m_NumRead;
-    double* m_Z;
-    double* m_Hiz;
-    double* m_Loz;
-    long* m_kCenter;
-    double m_Cost;
     unsigned int m_ITER;
-    int m_NumFeasible;
-    int* m_Feasible;
-
     bool** m_IsCenter;
     bool** m_SwitchMembership;
     int** m_CenterTable;
-
-    unsigned int m_CallIndex;
+    unsigned int m_CL;
+    unsigned int m_ThreadCount;
 public:
-    PKMedianAccumulator2(long kmin, long kmax, long* kfinal, unsigned int ITER, bool** isCenter, int** centerTable, bool** switchMembership);
+    PKMedianAccumulator2(unsigned int CACHE_LINE, long kmin, long kmax, long* kfinal, unsigned int ITER, bool** isCenter, int** centerTable, bool** switchMembership, unsigned int m_ThreadCount);
     virtual raft::kstatus run();
 };
 

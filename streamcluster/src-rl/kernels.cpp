@@ -474,11 +474,9 @@ raft::kstatus SelectFeasible_FastKernel::run()
     return raft::proceed;
 }
 
-PGainCallManager::PGainCallManager(unsigned int CACHE_LINE, unsigned int threadCount)
-    : raft::kernel(), m_CL(CACHE_LINE / sizeof(double)), m_ThreadCount(threadCount)
+PGainCallManager::PGainCallManager(unsigned int CACHE_LINE, unsigned int threadCount, PGainCallManager_Input inputData)
+    : raft::kernel(), m_CL(CACHE_LINE / sizeof(double)), m_ThreadCount(threadCount), m_InputData(inputData)
 {
-    input.addPort<PGainCallManager_Input>("input");
-    
     for (auto i = 0; i < m_ThreadCount; i++)
     {
         // The output will command the worker threads
@@ -489,11 +487,11 @@ PGainCallManager::PGainCallManager(unsigned int CACHE_LINE, unsigned int threadC
 raft::kstatus PGainCallManager::run()
 {
     std::cout << "Executing PGainCallManager run" << std::endl;
-    PGainCallManager_Input inputData = input["input"].peek<PGainCallManager_Input>();
+    //PGainCallManager_Input inputData = input["input"].peek<PGainCallManager_Input>();
 
     // cl and stride are values which are all the same when calculated by each thread...
     // might as well condense the first section of pgain into one thread work.
-    unsigned int stride = *(inputData.kCenter) + 2;
+    unsigned int stride = *(m_InputData.kCenter) + 2;
     if (stride % m_CL != 0)
         stride = m_CL * (stride / m_CL + 1);
     
@@ -501,9 +499,7 @@ raft::kstatus PGainCallManager::run()
     double* work_mem = new double[stride * (m_ThreadCount + 1)];
 
     for (auto i = 0; i < m_ThreadCount; i++)
-        output[std::to_string(i).c_str()].push<PGainWorker1_IO>(PGainWorker1_IO(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, inputData.cost, inputData.numFeasible, stride, m_CL, work_mem, i, inputData.numRead / m_ThreadCount, inputData.x));
-
-    input["input"].recycle();
+        output[std::to_string(i).c_str()].push<PGainWorker1_IO>(PGainWorker1_IO(m_InputData.points, m_InputData.numRead, m_InputData.z, m_InputData.kCenter, m_InputData.cost, m_InputData.numFeasible, stride, m_CL, work_mem, i, m_InputData.numRead / m_ThreadCount, m_InputData.x));
 
     return raft::proceed;
 }
@@ -873,16 +869,14 @@ raft::kstatus PGainWorker5::run()
     return raft::proceed;
 }
 
-PGainAccumulator5::PGainAccumulator5(unsigned int threadCount)
-    : raft::kernel_all(), m_ThreadCount(threadCount)
+PGainAccumulator5::PGainAccumulator5(double* result, unsigned int threadCount)
+    : raft::kernel_all(), m_ThreadCount(threadCount), m_Result(result)
 {
     for (auto i = 0; i < m_ThreadCount; i++)
     {
         // Input from the worker threads
         input.addPort<PGainWorker4_Output>(std::to_string(i).c_str());
     }
-
-    output.addPort<double>("output");
 }
 
 raft::kstatus PGainAccumulator5::run()
@@ -916,185 +910,168 @@ raft::kstatus PGainAccumulator5::run()
     for (auto i = 0; i < m_ThreadCount; i++)
         input[std::to_string(i).c_str()].recycle();
 
-    output["output"].push<double>(-gl_cost_of_opening_x);
+    *m_Result = -gl_cost_of_opening_x;
 
     return raft::proceed;
 }
 
-PFLCallManager::PFLCallManager()
-    : raft::kernel(), m_Change(0.0)
+PFLCallManager::PFLCallManager(unsigned int CL, bool** isCenter, bool** switchMembership, int** centerTable, unsigned int threadCount, PFLCallManager_Input inputData)
+    : raft::kernel(), m_CL(CL), m_IsCenter(isCenter), m_SwitchMembership(switchMembership), m_CenterTable(centerTable), m_ThreadCount(threadCount), m_InputData(inputData)
 {
-    // This is for when pFL is called in the code
-    input.addPort<PFLCallManager_Input>("input_main");
-
-    // This is for the result of pgain
-    input.addPort<double>("input_change");
-
-    // This is for calling pgain
-    output.addPort<PGainCallManager_Input>("output_pgain");
-
     // This is the output of pFL
-    output.addPort<double>("output_cost");
+    output.addPort<double>("output");
 }
 
 raft::kstatus PFLCallManager::run()
 {
-    //std::cout << "Executing PFLCallManager run" << std::endl;
-    if (input["input_main"].size() > 0)
+    std::cout << "Executing PFLCallManager run" << std::endl;
+
+    unsigned int iterationIndex = 0;
+    double cost = m_InputData.cost;
+    double change = m_InputData.cost;
+
+    while (change / cost > 1.0 * m_InputData.e)
     {
-        std::cout << "pFL called" << std::endl;
-        // This is a call for pFL
-        PFLCallManager_Input inputData = input["input_main"].peek<PFLCallManager_Input>();
-        m_Change = inputData.cost;
-        m_Cost = inputData.cost;
-        m_E = inputData.e;
-        m_Points = inputData.points;
-        m_NumRead = inputData.numRead;
-        m_Z = inputData.z;
-        m_kCenter = inputData.kCenter;
-        m_Iter = inputData.iter;
-        m_NumFeasible = inputData.numFeasible;
-        m_Feasible = inputData.feasible;
-        m_IterationIndex = 0;
+        change = 0.0;
 
-        intshuffle(m_Feasible, m_NumFeasible);
+        intshuffle(m_InputData.feasible, m_InputData.numFeasible);
 
-        output["output_pgain"].push<PGainCallManager_Input>(PGainCallManager_Input(m_Points, m_NumRead, m_Z, m_kCenter, m_Cost, m_NumFeasible, m_IterationIndex % m_NumFeasible, 0));
-        input["input_main"].recycle();
-
-        return raft::proceed;
-    }
-    else if (input["input_change"].size() > 0)
-    {
-        // pgain has completed
-        m_IterationIndex++;
-
-        m_Change += input["input_change"].peek<double>();
-        input["input_change"].recycle();
-
-        if (m_IterationIndex >= m_Iter)
+        while (iterationIndex < m_InputData.iter)
         {
-            m_Cost -= m_Change;
-            if (m_Change / m_Cost > 1.0 * m_E)
+            double result = 0.0;
+
+            PGainCallManager manager(m_CL, m_ThreadCount, PGainCallManager_Input(m_InputData.points, m_InputData.numRead, m_InputData.z, m_InputData.kCenter, cost, m_InputData.numFeasible, iterationIndex % m_InputData.numFeasible, 0));
+            PGainWorker1* worker1s[m_ThreadCount];
+            PGainAccumulator1 accum1(m_ThreadCount);
+            PGainWorker2* worker2s[m_ThreadCount];
+            PGainAccumulator2 accum2(m_ThreadCount);
+            PGainWorker3* worker3s[m_ThreadCount];
+            PGainAccumulator3 accum3(m_ThreadCount);
+            PGainWorker4* worker4s[m_ThreadCount];
+            PGainAccumulator4 accum4(m_ThreadCount);
+            PGainWorker5* worker5s[m_ThreadCount];
+            PGainAccumulator5 accum5(&result, m_ThreadCount);
+            raft::map m;
+
+            for (auto i = 0; i < m_ThreadCount; i++)
             {
-                m_IterationIndex = 0;
-                m_Change = 0.0;
-                intshuffle(m_Feasible, m_NumFeasible);
+                const char* val = std::to_string(i).c_str();
+                worker1s[i] = new PGainWorker1(m_IsCenter, m_CenterTable);
+                m += manager[val] >> *(worker1s[i]) >> accum1[val];
+                worker2s[i] = new PGainWorker2(m_IsCenter, m_CenterTable, m_SwitchMembership);
+                m += accum1[val] >> *(worker2s[i]) >> accum2[val];
+                worker3s[i] = new PGainWorker3(m_IsCenter, m_CenterTable, m_SwitchMembership, m_ThreadCount);
+                m += accum2[val] >> *(worker3s[i]) >> accum3[val];
+                worker4s[i] = new PGainWorker4(m_IsCenter, m_CenterTable, m_ThreadCount);
+                m += accum3[val] >> *(worker4s[i]) >> accum4[val];
+                worker5s[i] = new PGainWorker5(m_IsCenter, m_CenterTable, m_SwitchMembership);
+                m += accum4[val] >> *(worker5s[i]) >> accum5[val];
+            }
+
+            m.exe();
+            change += result;
+
+            // pgain has completed
+            iterationIndex++;
+
+            for (auto i = 0; i < m_ThreadCount; i++)
+            {
+                delete worker1s[i];
+                delete worker2s[i];
+                delete worker3s[i];
+                delete worker4s[i];
+                delete worker5s[i];
             }
         }
-
-        if (m_IterationIndex < m_Iter)
-            output["output_pgain"].push<PGainCallManager_Input>(PGainCallManager_Input(m_Points, m_NumRead, m_Z, m_kCenter, m_Cost, m_NumFeasible, m_IterationIndex % m_NumFeasible, 0));
-        else
-        {
-            output["output_cost"].push<double>(m_Cost);
-            return raft::proceed;
-        }
-
-        return raft::proceed;
+        cost -= change;
     }
 
+    output["output"].push<double>(cost);
+    input["input"].recycle();
     return raft::proceed;
 }
 
-PKMedianAccumulator2::PKMedianAccumulator2(long kmin, long kmax, long* kfinal, unsigned int ITER, bool** isCenter, int** centerTable, bool** switchMembership)
-    : raft::kernel(), m_kMin(kmin), m_kMax(kmax), m_ITER(ITER), m_kFinal(kfinal), m_IsCenter(isCenter), m_CenterTable(centerTable), m_SwitchMembership(switchMembership)
+PFLCallConsumer::PFLCallConsumer(double* result)
+    : raft::kernel(), m_Result(result)
+{
+    input.addPort<double>("input");
+}
+
+raft::kstatus PFLCallConsumer::run()
+{
+    *m_Result = input["input"].peek<double>();
+    input["input"].recycle();
+    return raft::proceed;
+}
+
+PKMedianAccumulator2::PKMedianAccumulator2(unsigned int CACHE_LINE, long kmin, long kmax, long* kfinal, unsigned int ITER, bool** isCenter, int** centerTable, bool** switchMembership, unsigned int threadCount)
+    : raft::kernel(), m_CL(CACHE_LINE), m_kMin(kmin), m_kMax(kmax), m_ITER(ITER), m_kFinal(kfinal), m_IsCenter(isCenter), m_CenterTable(centerTable), m_SwitchMembership(switchMembership), m_ThreadCount(threadCount)
 {
     // This is the entry point to this kernel from selectfeasible_fast
-    input.addPort<SelectFeasible_FastKernel_Output>("input_main");
+    input.addPort<SelectFeasible_FastKernel_Output>("input");
 
-    // This is the input from the pFL calls
-    input.addPort<double>("input_pfl");
-
-    // This is the output to a pFL call
-    output.addPort<PFLCallManager_Input>("output_pfl");
-
-    // This is the cost output of pkMedian
-    //output.addPort<double>("output_cost"); (not used currently)
-    output.addPort<ContCentersKernel_Input>("output_end");
+    output.addPort<ContCentersKernel_Input>("output");
 }
 
 raft::kstatus PKMedianAccumulator2::run()
 {
     std::cout << "Executing PMedianAccumulator2 kernel" << std::endl;
-    if (input["input_main"].size() > 0)
+
+    // This is the entry in PKMedianPt3
+    SelectFeasible_FastKernel_Output inputData = input["input"].peek<SelectFeasible_FastKernel_Output>();
+    double cost = inputData.cost;
+
+    while (true)
     {
-        // This is the entry in PKMedianPt3
-        SelectFeasible_FastKernel_Output inputData = input["input_main"].peek<SelectFeasible_FastKernel_Output>();
-        m_Points = inputData.points;
-        m_NumRead = inputData.numRead;
-        m_Z = inputData.z;
-        m_Hiz = inputData.hiz;
-        m_Loz = inputData.loz;
-        m_kCenter = inputData.kCenter;
-        m_Cost = inputData.cost;
-        m_NumFeasible = inputData.numFeasible;
-        m_Feasible = inputData.feasible;
-        m_CallIndex = 0;
+        PFLCallManager manager(m_CL, m_IsCenter, m_SwitchMembership, m_CenterTable, m_ThreadCount, PFLCallManager_Input(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, cost, inputData.numFeasible, inputData.feasible, m_ITER, 0.1));
+        PFLCallConsumer consumer(&cost);
+        raft::map m;
+        m += manager >> consumer;
+        m.exe();
 
-        std::cout << "Calling pFL" << std::endl;
-        output["output_pfl"].push<PFLCallManager_Input>(PFLCallManager_Input(m_Points, m_NumRead, m_Z, m_kCenter, m_Cost, m_NumFeasible, m_Feasible, (long) (m_ITER * m_kMax * log((double) m_kMax)), 0.1));
-        input["input_main"].recycle();
-
-        return raft::proceed;
-    }
-    else if (input["input_pfl"].size() > 0)
-    {
-        // pfl was just completed
-        m_Cost = input["input_pfl"].peek<double>();
-        input["input_pfl"].recycle();
-
-        bool should_run_again = ((*m_kCenter <= (1.1) * m_kMax) && (*m_kCenter >= (0.9) * m_kMin)) || ((*m_kCenter <= m_kMax + 2) && (*m_kCenter >= m_kMin - 2));
-
-        if (m_CallIndex == 0 && should_run_again)
+        bool should_run_again = ((*(inputData.kCenter) <= (1.1) * m_kMax) && (*(inputData.kCenter) >= (0.9) * m_kMin)) || ((*(inputData.kCenter) <= m_kMax + 2) && (*(inputData.kCenter) >= m_kMin - 2));
+        if (should_run_again)
         {
-            std::cout << "Calling pFL" << std::endl;
-            m_CallIndex = 1;
-            output["output_pfl"].push<PFLCallManager_Input>(PFLCallManager_Input(m_Points, m_NumRead, m_Z, m_kCenter, m_Cost, m_NumFeasible, m_Feasible, (long) (m_ITER * m_kMax * log((double) m_kMax)), 0.001));
-            return raft::proceed;
-        }
-        else
-        {
-            m_CallIndex = 0;
-            if (*m_kCenter > m_kMax)
-            {
-                *m_Loz = *m_Z;
-                *m_Z = (*m_Hiz + *m_Loz) / 2.0;
-                m_Cost += (*m_Z - *m_Loz) * *m_kCenter;
-            }
-
-            if (*m_kCenter < m_kMin)
-            {
-                *m_Hiz = *m_Z;
-                *m_Z = (*m_Hiz + *m_Loz) / 2.0;
-                m_Cost += (*m_Z - *m_Hiz) * *m_kCenter;
-            }
-
-            bool should_break = ((*m_kCenter <= m_kMax) && (*m_kCenter >= m_kMin)) || ((*m_Loz >= (0.999) * *m_Hiz));
-            if (!should_break)
-            {
-                std::cout << "Calling pFL" << std::endl;
-                output["output_pfl"].push<PFLCallManager_Input>(PFLCallManager_Input(m_Points, m_NumRead, m_Z, m_kCenter, m_Cost, m_NumFeasible, m_Feasible, (long) (m_ITER * m_kMax * log((double) m_kMax)), 0.1));
-                return raft::proceed;
-            }
-
-            
-            *m_kFinal = *m_kCenter;
-
-            delete[] m_Feasible;
-            delete m_Hiz;
-            delete m_Loz;
-            delete m_Z;
-            delete[] *m_SwitchMembership;
-            delete[] *m_IsCenter;
-            delete[] *m_CenterTable;
-
-            //output["output_cost"].push<double>(m_Cost); cost is not actually used after this
-            output["output_end"].push<ContCentersKernel_Input>(ContCentersKernel_Input(m_NumRead, m_Points));
-            return raft::proceed;
+            PFLCallManager manager1(m_CL, m_IsCenter, m_SwitchMembership, m_CenterTable, m_ThreadCount, PFLCallManager_Input(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, cost, inputData.numFeasible, inputData.feasible, m_ITER, 0.01));
+            PFLCallConsumer consumer1(&cost);
+            raft::map m1;
+            m1 += manager1 >> consumer1;
+            m1.exe();
         }
 
+        if (*(inputData.kCenter) > m_kMax)
+        {
+            *(inputData.loz) = *(inputData.z);
+            *(inputData.z) = (*(inputData.hiz) + *(inputData.loz)) / 2.0;
+            cost += (*(inputData.z) - *(inputData.loz)) * *(inputData.kCenter);
+        }
+
+        if (*(inputData.kCenter) < m_kMin)
+        {
+            *(inputData.hiz) = *(inputData.z);
+            *(inputData.z) = (*(inputData.hiz) + *(inputData.loz)) / 2.0;
+            cost += (*(inputData.z) - *(inputData.hiz)) * *(inputData.kCenter);
+        }
+
+
+        bool should_break = ((*(inputData.kCenter) <= m_kMax) && (*(inputData.kCenter) >= m_kMin)) || ((*(inputData.loz) >= (0.999) * *(inputData.hiz)));
+        if (should_break)
+            break;
     }
+
+    *m_kFinal = *(inputData.kCenter);
+
+    delete[] inputData.feasible;
+    delete inputData.hiz;
+    delete inputData.loz;
+    delete inputData.z;
+    delete[] *m_SwitchMembership;
+    delete[] *m_IsCenter;
+    delete[] *m_CenterTable;
+
+    input["input"].recycle();
+    output["output"].push<ContCentersKernel_Input>(ContCentersKernel_Input(inputData.numRead, inputData.points));
+
     return raft::proceed;
 }
 
