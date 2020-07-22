@@ -1119,7 +1119,8 @@ raft::kstatus PKMedianAccumulator2::run()
     return raft::proceed;
 }
 
-ContCentersKernel::ContCentersKernel(Points* points, Points* centers) : raft::kernel(), m_Points(points), m_Centers(centers)
+ContCentersKernel::ContCentersKernel(Points* points, Points* centers, long* kFinal, long centersize) 
+    : raft::kernel(), m_Points(points), m_Centers(centers), m_kFinal(kFinal), m_CenterSize(centersize)
 {
     input.addPort<ContCentersKernel_Input>("input_pkmedian2");
     input.addPort<ContCentersKernel_Input>("input_pkmedian1");
@@ -1168,6 +1169,12 @@ raft::kstatus ContCentersKernel::run()
         }
     }
 
+    if (*m_kFinal + m_Centers->num > m_CenterSize)
+    {
+        std::cerr << "No more space for centers!" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
     if (points == m_Points)
     {
         std::cout << "Sending data to copy centers" << std::endl;
@@ -1178,7 +1185,6 @@ raft::kstatus ContCentersKernel::run()
         std::cout << "Sending data to output centers" << std::endl;
         output["output_out"].push<size_t>(numRead);
     }
-        
     
     //input["input"].recycle();
 
@@ -1197,25 +1203,26 @@ raft::kstatus CopyCentersKernel::run()
     std::cout << "Copying centers" << std::endl;
     size_t numRead = input["input"].peek<size_t>();
 
-    bool* is_a_median = new bool[numRead];
-    for (auto i = 0; i < numRead; i++)
-        is_a_median[m_Points->p[i].assign] = 1;
+    bool* is_a_median = new bool[m_Points->num];
+    for (auto i = 0; i < m_Points->num; i++)
+        is_a_median[i] = 0;
 
-    std::cout << "Made it this far" << std::endl;
+    for (auto i = 0; i < m_Points->num; i++)
+        is_a_median[m_Points->p[i].assign] = 1;
 
     long k = m_Centers->num;
 
-    for (auto i = 0; i < numRead; i++)
+    for (auto i = 0; i < m_Points->num; i++)
     {
+        std::cout << i << std::endl;
         if (is_a_median[i])
         {
             memcpy(m_Centers->p[k].coord, m_Points->p[i].coord, m_Points->dim * sizeof(float));
             m_Centers->p[k].weight = m_Points->p[i].weight;
-            m_CenterIDs[k] = i + *m_Offset;
+            m_CenterIDs[k] = i + *m_Offset - m_Points->num;
             k++;
         }
     }
-
     m_Centers->num = k;
 
     delete[] is_a_median;
@@ -1249,6 +1256,10 @@ raft::kstatus OutCenterIDsKernel::run()
 
     int* is_a_median = new int[m_Centers->num];
     for (auto i = 0; i < m_Centers->num; i++)
+        is_a_median[i] = 0;
+
+
+    for (auto i = 0; i < m_Centers->num; i++)
         is_a_median[m_Centers->p[i].assign] = 1;
 
     for (auto i = 0; i < m_Centers->num; i++)
@@ -1266,6 +1277,8 @@ raft::kstatus OutCenterIDsKernel::run()
 
     std::cout << "Done!" << std::endl;
     output["output"].push<int>(0);
+
+    delete[] is_a_median;
 
     return raft::stop;
 }

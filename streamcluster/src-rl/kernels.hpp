@@ -464,8 +464,10 @@ class ContCentersKernel : public raft::kernel
 {
     Points* m_Points;
     Points* m_Centers;
+    long* m_kFinal;
+    long m_CenterSize;
 public:
-    ContCentersKernel(Points* points, Points* centers);
+    ContCentersKernel(Points* points, Points* centers, long* kFinal, long centersize);
     virtual raft::kstatus run();
 };
 

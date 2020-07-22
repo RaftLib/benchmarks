@@ -917,6 +917,9 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
     exit(1);
   }
 
+  std::cout << "Chunksize: " << chunksize << std::endl;
+  std::cout << "Centersize: " << centersize << std::endl;
+
   Points points( chunksize /** n **/, dim /** dim **/, chunksize /** reserve **/ );
 
   for( int i = 0; i < chunksize; i++ ) 
@@ -936,7 +939,7 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
   int** centerTable = new int*[1];
 
   long IDoffset = 0;
-  long kfinal;
+  long kfinal = 0;
 
   bool shouldContinue = true;
   // Kernel Initialization
@@ -948,7 +951,7 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
   PSpeedyCallManager pSpeedyCallManager(nproc, kmin, SP);
   SelectFeasible_FastKernel selectFeasible(kmin, ITER, isCenter);
   PKMedianAccumulator2 pkMedianAccumulator2(CACHE_LINE, kmin, kmax, &kfinal, ITER, isCenter, centerTable, switchMembership, nproc);
-  ContCentersKernel contCenters(&points, &centers);
+  ContCentersKernel contCenters(&points, &centers, &kfinal, centersize);
   CopyCentersKernel copyCenters(&points, &centers, centerIDs, &IDoffset);
   OutCenterIDsKernel outCenters(&centers, centerIDs, outfile);
   raft::map m;
