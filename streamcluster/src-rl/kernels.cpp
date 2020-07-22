@@ -359,13 +359,22 @@ raft::kstatus PSpeedyWorker::run()
 
     Points* points = inputData.points;
 
-    // If a center was opened for this iteration
-    if (inputData.work || inputData.iterationIndex == 0)
+    if (inputData.iterationIndex == 0)
     {
         for (auto k = k1; k < k2; k++)
         {
             float distance = dist(points->p[k], points->p[0], points->dim);
-            if (distance * points->p[k].weight < points->p[k].cost || inputData.iterationIndex == 0)
+            points->p[k].cost = distance * points->p[k].weight;
+            points->p[k].assign=inputData.iterationIndex;
+        }
+    }
+    else if (inputData.work)
+    {
+        // If a center was opened for this iteration
+        for (auto k = k1; k < k2; k++)
+        {
+            float distance = dist(points->p[inputData.iterationIndex], points->p[k], points->dim);
+            if (distance * points->p[k].weight < points->p[k].cost)
             {
                 points->p[k].cost = distance * points->p[k].weight;
 	            points->p[k].assign=inputData.iterationIndex;
@@ -947,6 +956,11 @@ raft::kstatus PFLCallManager::run()
     double cost = m_InputData.cost;
     double change = m_InputData.cost;
 
+    std::cout << "Z: " << *(m_InputData.z) << std::endl;
+    std::cout << "Initial cost: " << cost << std::endl;
+    std::cout << "Iter: " << m_InputData.iter << std::endl;
+    std::cout << "E: " << m_InputData.e << std::endl;
+
     while (change / cost > 1.0 * m_InputData.e)
     {
         change = 0.0;
@@ -1047,7 +1061,7 @@ raft::kstatus PKMedianAccumulator2::run()
         bool should_run_again = ((*(inputData.kCenter) <= (1.1) * m_kMax) && (*(inputData.kCenter) >= (0.9) * m_kMin)) || ((*(inputData.kCenter) <= m_kMax + 2) && (*(inputData.kCenter) >= m_kMin - 2));
         if (should_run_again)
         {
-            PFLCallManager manager1(m_CL, m_IsCenter, m_SwitchMembership, m_CenterTable, m_ThreadCount, PFLCallManager_Input(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, cost, inputData.numFeasible, inputData.feasible, m_ITER, 0.01));
+            PFLCallManager manager1(m_CL, m_IsCenter, m_SwitchMembership, m_CenterTable, m_ThreadCount, PFLCallManager_Input(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, cost, inputData.numFeasible, inputData.feasible, m_ITER, 0.001));
             PFLCallConsumer consumer1(&cost);
             raft::map m1;
             m1 += manager1 >> consumer1;
