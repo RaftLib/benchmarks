@@ -492,7 +492,7 @@ raft::kstatus SelectFeasible_FastKernel::run()
 
     // Will also perform the is_center assignments
     for (auto i = 0; i < inputData.numRead; i++)
-        *m_IsCenter[inputData.points->p[i].assign] = true;
+        (*m_IsCenter)[inputData.points->p[i].assign] = true;
 
     output["output"].push<SelectFeasible_FastKernel_Output>(SelectFeasible_FastKernel_Output(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, inputData.cost, inputData.hiz, inputData.loz, numfeasible, feasible));
     input["input"].recycle();
@@ -557,6 +557,8 @@ raft::kstatus PGainWorker1::run()
             (*m_CenterTable)[i] = count++;
     }
     inputData.work_mem[inputData.tid * stride] = count;
+
+    //std::cout << "Count: " << count << std::endl;
 
     output["output"].push<PGainWorker1_IO>(PGainWorker1_IO(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, inputData.cost, inputData.numFeasible, inputData.stride, inputData.cl, inputData.work_mem, inputData.tid, inputData.blockSize, inputData.x));
     input["input"].recycle();
@@ -631,6 +633,9 @@ raft::kstatus PGainWorker2::run()
         if ((*m_IsCenter)[i]) 
             (*m_CenterTable)[i] += (int) inputData.work_mem[inputData.tid * stride];
     }
+
+    //for (auto i = 0; i < inputData.numRead; i++)
+    //    std::cout << "Center Table: " << (*m_CenterTable)[i] << std::endl;
 
     memset(*m_SwitchMembership + k1, 0, (k2 - k1) * sizeof(bool));
     memset(inputData.work_mem + inputData.tid * stride, 0, stride * sizeof(double)); // getting stuck here, sometimes segfaults
@@ -780,6 +785,9 @@ raft::kstatus PGainWorker4::run()
 
     unsigned int number_of_centers_to_close = 0;
 
+    //std::cout << "Number of centers to close prior: " << number_of_centers_to_close << std::endl;
+    //std::cout << "Cost of opening x prior: " << inputData.cost_of_opening_x << std::endl;
+
     for (auto i = k1; i < k2; i++) 
     {
         if ((*m_IsCenter)[i]) 
@@ -801,6 +809,10 @@ raft::kstatus PGainWorker4::run()
             }
         }
     }
+
+    //std::cout << "Number of centers to close: " << number_of_centers_to_close << std::endl;
+    //std::cout << "Cost of opening x: " << inputData.cost_of_opening_x << std::endl;
+
     //use the rest of working memory to store the following
     inputData.work_mem[inputData.tid * inputData.stride + *(inputData.kCenter)] = number_of_centers_to_close;
     inputData.work_mem[inputData.tid * inputData.stride + *(inputData.kCenter) + 1] = inputData.cost_of_opening_x;
@@ -828,7 +840,7 @@ raft::kstatus PGainAccumulator4::run()
 {
     //std::cout << "Executing PGainAccumulator4 run" << std::endl;
     unsigned int gl_number_of_centers_to_close = 0;
-    double gl_cost_of_opening_x = 0.0;
+    double gl_cost_of_opening_x = *(input["0"].peek<PGainWorker4_Output>().z);
 
     for (auto i = 0; i < m_ThreadCount; i++)
     {
@@ -971,7 +983,7 @@ raft::kstatus PFLCallManager::run()
         {
             double result = 0.0;
 
-            PGainCallManager manager(m_CL, m_ThreadCount, PGainCallManager_Input(m_InputData.points, m_InputData.numRead, m_InputData.z, m_InputData.kCenter, cost, m_InputData.numFeasible, iterationIndex % m_InputData.numFeasible, 0));
+            PGainCallManager manager(m_CL, m_ThreadCount, PGainCallManager_Input(m_InputData.points, m_InputData.numRead, m_InputData.z, m_InputData.kCenter, cost, m_InputData.numFeasible, m_InputData.feasible[iterationIndex % m_InputData.numFeasible], 0));
             PGainWorker1* worker1s[m_ThreadCount];
             PGainAccumulator1 accum1(m_ThreadCount);
             PGainWorker2* worker2s[m_ThreadCount];
@@ -1015,6 +1027,7 @@ raft::kstatus PFLCallManager::run()
         }
         cost -= change;
     }
+    std::cout << "PFL Cost Result: " << cost << std::endl;
 
     output["output"].push<double>(cost);
     return raft::stop;
@@ -1052,7 +1065,8 @@ raft::kstatus PKMedianAccumulator2::run()
 
     while (true)
     {
-        PFLCallManager manager(m_CL, m_IsCenter, m_SwitchMembership, m_CenterTable, m_ThreadCount, PFLCallManager_Input(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, cost, inputData.numFeasible, inputData.feasible, m_ITER, 0.1));
+        std::cout << "Calling pFL" << std::endl;
+        PFLCallManager manager(m_CL, m_IsCenter, m_SwitchMembership, m_CenterTable, m_ThreadCount, PFLCallManager_Input(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, cost, inputData.numFeasible, inputData.feasible, (long) (m_ITER * m_kMax * log((double) m_kMax)), 0.1));
         PFLCallConsumer consumer(&cost);
         raft::map m;
         m += manager >> consumer;
@@ -1061,7 +1075,8 @@ raft::kstatus PKMedianAccumulator2::run()
         bool should_run_again = ((*(inputData.kCenter) <= (1.1) * m_kMax) && (*(inputData.kCenter) >= (0.9) * m_kMin)) || ((*(inputData.kCenter) <= m_kMax + 2) && (*(inputData.kCenter) >= m_kMin - 2));
         if (should_run_again)
         {
-            PFLCallManager manager1(m_CL, m_IsCenter, m_SwitchMembership, m_CenterTable, m_ThreadCount, PFLCallManager_Input(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, cost, inputData.numFeasible, inputData.feasible, m_ITER, 0.001));
+            std::cout << "Calling pFL a second time" << std::endl;
+            PFLCallManager manager1(m_CL, m_IsCenter, m_SwitchMembership, m_CenterTable, m_ThreadCount, PFLCallManager_Input(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, cost, inputData.numFeasible, inputData.feasible, (long) (m_ITER * m_kMax * log((double) m_kMax)), 0.001));
             PFLCallConsumer consumer1(&cost);
             raft::map m1;
             m1 += manager1 >> consumer1;
@@ -1185,6 +1200,8 @@ raft::kstatus CopyCentersKernel::run()
     bool* is_a_median = new bool[numRead];
     for (auto i = 0; i < numRead; i++)
         is_a_median[m_Points->p[i].assign] = 1;
+
+    std::cout << "Made it this far" << std::endl;
 
     long k = m_Centers->num;
 
