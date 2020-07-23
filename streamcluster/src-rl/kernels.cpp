@@ -162,6 +162,8 @@ raft::kstatus PKMedianAccumulator1::run()
         input[std::to_string(i).c_str()].recycle();
     }
 
+    std::cout << "Total hiz: " << *hiz << std::endl;
+
     *z = (*hiz + *loz) / 2.0;
 
     if (numRead <= m_kMax)
@@ -207,6 +209,8 @@ raft::kstatus PSpeedyCallManager::run()
     unsigned int iterationIndex = 0;
     unsigned int pSpeedyExecutionCount = 0;
 
+    std::cout << "Z value: " << *(inputData.z) << std::endl;
+
     double totalCost = 0.0;
 
     // Do the initial points shuffle
@@ -222,10 +226,14 @@ raft::kstatus PSpeedyCallManager::run()
         m1 += producer1[std::to_string(i).c_str()] >> workers1[i] >> consumer1[std::to_string(i).c_str()];
 
     m1.exe();
+
+    std::cout << "Cost after pspeedy: " << totalCost << std::endl;
+
     iterationIndex++;
     *(inputData.kCenter) = 1;
 
     bool shouldContinue = true;
+    bool doneWithFirstLoop = false;
 
     while (shouldContinue)
     {
@@ -235,13 +243,23 @@ raft::kstatus PSpeedyCallManager::run()
             // At this point, an entire function call of "pspeedy" has been completed
             // Now, we need to decide whether to perform another based upon the values of kCenter, kmin, and SP
             pSpeedyExecutionCount++;
+            std::cout << "Cost after pspeedy: " << totalCost << std::endl;
+            std::cout << "KCenters after pspeedy: " << *(inputData.kCenter) << std::endl;
             
-            if ((*(inputData.kCenter) < m_kMin) && (pSpeedyExecutionCount < m_SP + 1))
+            if ((*(inputData.kCenter) < m_kMin) && (pSpeedyExecutionCount < m_SP) && doneWithFirstLoop)
             {
                 // At this point, we are giving pspeedy SP chances to get at least kmin/2 facilities
                 // Perform pspeedy again like we just restarted
                 iterationIndex = 0;
                 *(inputData.kCenter) = 1;
+            }
+            else if ((*(inputData.kCenter) < m_kMin) && (pSpeedyExecutionCount < m_SP + 1) && !doneWithFirstLoop)
+            {
+                // At this point, we are giving pspeedy SP chances to get at least kmin/2 facilities
+                // Perform pspeedy again like we just restarted
+                iterationIndex = 0;
+                *(inputData.kCenter) = 1;
+                doneWithFirstLoop = true;
             }
             else if (*(inputData.kCenter) < m_kMin)
             {
@@ -266,18 +284,22 @@ raft::kstatus PSpeedyCallManager::run()
                 to_open = ((float) lrand48() / (float) INT_MAX) < (inputData.points->p[iterationIndex].cost / *(inputData.z));
                 if (to_open)
                     (*(inputData.kCenter))++;
-            }       
-            
-            // Command the worker threads (they will not do any operations if to_open is false)
-            PSpeedyWorkerProducer producer(inputData.points, inputData.numRead, to_open, iterationIndex, m_ThreadCount);
-            PSpeedyWorker workers[m_ThreadCount];
-            PSpeedyWorkerConsumer consumer(&totalCost, m_ThreadCount);
-            raft::map m;
+            }
 
-            for (auto i = 0; i < m_ThreadCount; i++)
-                m += producer[std::to_string(i).c_str()] >> workers[i] >> consumer[std::to_string(i).c_str()];
+            //if (to_open)
+            //{
+                // Command the worker threads (they will not do any operations if to_open is false)
+                PSpeedyWorkerProducer producer(inputData.points, inputData.numRead, to_open, iterationIndex, m_ThreadCount);
+                PSpeedyWorker workers[m_ThreadCount];
+                PSpeedyWorkerConsumer consumer(&totalCost, m_ThreadCount);
+                raft::map m;
 
-            m.exe();
+                for (auto i = 0; i < m_ThreadCount; i++)
+                    m += producer[std::to_string(i).c_str()] >> workers[i] >> consumer[std::to_string(i).c_str()];
+
+                m.exe();
+            //}       
+
             iterationIndex++;
         }
     }
@@ -482,7 +504,6 @@ PGainCallManager::PGainCallManager(unsigned int CACHE_LINE, unsigned int threadC
 
 raft::kstatus PGainCallManager::run()
 {
-    std::cout << "Executing PGainCallManager run" << std::endl;
     //PGainCallManager_Input inputData = input["input"].peek<PGainCallManager_Input>();
 
     // cl and stride are values which are all the same when calculated by each thread...
@@ -1183,7 +1204,6 @@ raft::kstatus CopyCentersKernel::run()
 
     for (auto i = 0; i < m_Points->num; i++)
     {
-        std::cout << i << std::endl;
         if (is_a_median[i])
         {
             memcpy(m_Centers->p[k].coord, m_Points->p[i].coord, m_Points->dim * sizeof(float));
