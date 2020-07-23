@@ -1,7 +1,7 @@
 #include "../streamcluster.hpp"
 
 // This test uses the "native" runconfig
-// This is equivalent to calling ./streamcluster 10 20 128 1000000 200000 5000 none output.txt 1
+// This is equivalent to calling ./streamcluster 10 20 128 1000000 200000 5000 none output.txt 4
 
 // Random seed value
 constexpr static std::uint8_t SEED = 1;
@@ -20,7 +20,7 @@ int main()
     filename[17] = '\0';
 
     // Perform streamCluster, will output to the given filename
-    streamCluster(stream, 10, 20, 128, 200000, 5000, filename, 1);
+    streamCluster(stream, 10, 20, 128, 200000, 5000, filename, 4);
 
     // Delete the stream
     delete stream;
