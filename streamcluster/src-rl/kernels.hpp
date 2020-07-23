@@ -4,8 +4,6 @@
 #include "streamcluster.hpp"
 #include <raft>
 
-#define MAX_PARALLEL_KERNELS 128
-
 struct PStreamReader_Output
 {
     size_t numRead;

@@ -12,6 +12,8 @@
 #include <sys/resource.h>
 #include <climits>
 
+#define MAX_PARALLEL_KERNELS 128
+
 /* this structure represents a point */
 /* these will be passed around to avoid copying coordinates */
 struct Point 
@@ -125,6 +127,9 @@ public:
 private:
   FILE* fp;
 };
+
+void streamCluster(PStream*, long, long, int, long, long, char*, int);
+
 
 
 #endif
