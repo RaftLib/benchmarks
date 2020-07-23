@@ -1,0 +1,11 @@
+RaftLib StreamCluster Implementation
+====================================
+
+To build with tests, do the following:
+
+1. Make a new directory (i.e. `mkdir build`) within the src-rl folder. Placing this somewhere else will cause the tests to fail due to relative paths.
+2. Enter that directory (`cd build`)
+3. Run `cmake ..` (optionally add flag -DMULTI_TESTS for multi-threaded test versions and/or -DNATIVE_TESTS for native data input tests).
+4. Run `make && make test`
+
+Otherwise, you may build in any directory and the streamcluster binary that is generated will work. 
