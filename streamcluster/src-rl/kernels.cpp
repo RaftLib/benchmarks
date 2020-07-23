@@ -2,7 +2,7 @@
 #include <limits>
 
 PStreamReader::PStreamReader(PStream* stream, float* block, int dim, long chunkSize, bool* shouldContinue, long* IDoffset)
-    : raft::kernel(), m_Stream(stream), m_Block(block), m_Dim(dim), m_ChunkSize(chunkSize), m_Continue(shouldContinue), m_IDoffset(IDoffset)
+    : raft::kernel(), m_Stream(stream), m_Dim(dim), m_ChunkSize(chunkSize), m_Block(block), m_Continue(shouldContinue), m_IDoffset(IDoffset)
 {
     // Create our output port
     output.addPort<PStreamReader_Output>("output");
@@ -18,7 +18,7 @@ raft::kstatus PStreamReader::run()
         numRead = m_Stream->read(m_Block, m_Dim, m_ChunkSize);
 
         // Error checking
-        if (m_Stream->ferror() || numRead < (unsigned int) m_ChunkSize && !m_Stream->feof())
+        if (m_Stream->ferror() || numRead < ((unsigned int) m_ChunkSize && !m_Stream->feof()))
         {
             std::cerr << "Error reading data!" << std::endl;
             exit(EXIT_FAILURE);
@@ -38,13 +38,13 @@ raft::kstatus PStreamReader::run()
 }
 
 LocalSearchStarter::LocalSearchStarter(Points* points, Points* centers, unsigned int threadCount, bool** isCenter, int** centerTable, bool** switchMembership)
-    : raft::kernel(), m_Points(points), m_Centers(centers), m_ThreadCount(threadCount), m_IsCenter(isCenter), m_SwitchMembership(switchMembership), m_CenterTable(centerTable)
+    : raft::kernel(), m_Points(points), m_Centers(centers), m_ThreadCount(threadCount), m_IsCenter(isCenter), m_CenterTable(centerTable), m_SwitchMembership(switchMembership)
 {
     // Create our input port
     input.addPort<PStreamReader_Output>("input");
 
     // Create our output ports based on the number of desired threads
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
         output.addPort<LocalSearchStarter_Output>(std::to_string(i).c_str());
 }
 
@@ -74,13 +74,13 @@ raft::kstatus LocalSearchStarter::run()
     }
     
 
-    for (auto i = 0; i < inputData.numRead; i++)
+    for (size_t i = 0; i < inputData.numRead; i++)
     {
         if (!inputData.useCenters)
             m_Points->p[i].weight = 1.0;
     }
 
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         if (inputData.useCenters)
             output[std::to_string(i).c_str()].push<LocalSearchStarter_Output>(LocalSearchStarter_Output(m_Centers, m_Centers->num, blockSize, i));
@@ -95,7 +95,8 @@ raft::kstatus LocalSearchStarter::run()
     return raft::proceed;
 }
 
-PKMedianWorker1::PKMedianWorker1() : raft::kernel()
+PKMedianWorker1::PKMedianWorker1() 
+    : raft::kernel()
 {
     input.addPort<LocalSearchStarter_Output>("input");
     output.addPort<PKMedianWorker1_Output>("output");
@@ -132,7 +133,7 @@ PKMedianAccumulator1::PKMedianAccumulator1(long kmin, long kmax, long* kFinal, u
     : raft::kernel_all(), m_kMin(kmin), m_kMax(kmax), m_kFinal(kFinal), m_ThreadCount(threadCount)
 {
     // Create our input ports based on the number of desired threads
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
         input.addPort<PKMedianWorker1_Output>(std::to_string(i).c_str());
 
     // PSpeedyCallManager Output
@@ -153,7 +154,7 @@ raft::kstatus PKMedianAccumulator1::run()
     size_t numRead = 0;
 
     // Read the input data
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         PKMedianWorker1_Output inputData = input[std::to_string(i).c_str()].peek<PKMedianWorker1_Output>();
         numRead = inputData.numRead;
@@ -166,9 +167,9 @@ raft::kstatus PKMedianAccumulator1::run()
 
     *z = (*hiz + *loz) / 2.0;
 
-    if (numRead <= m_kMax)
+    if ((long) numRead <= m_kMax)
     {
-        for (auto kk = 0; kk < numRead; kk++)
+        for (size_t kk = 0; kk < numRead; kk++)
         {
             points->p[kk].assign = kk;
             points->p[kk].cost = 0;
@@ -190,7 +191,8 @@ raft::kstatus PKMedianAccumulator1::run()
     return raft::proceed;
 }
 
-PSpeedyCallManager::PSpeedyCallManager(unsigned int threadCount, long kmin, unsigned int SP) : raft::kernel(), m_ThreadCount(threadCount), m_kMin(kmin), m_SP(SP)
+PSpeedyCallManager::PSpeedyCallManager(unsigned int threadCount, long kmin, unsigned int SP) 
+    : raft::kernel(), m_kMin(kmin), m_SP(SP), m_ThreadCount(threadCount)
 {
     // This input will come from whatever function calls pspeedy (should be pkmedian)
     input.addPort<PSpeedyCallManager_Input>("input");
@@ -218,11 +220,11 @@ raft::kstatus PSpeedyCallManager::run()
 
     // Command the worker threads (the first point is guaranteed to be a center)
     PSpeedyWorkerProducer producer1(inputData.points, inputData.numRead, true, iterationIndex, m_ThreadCount);
-    PSpeedyWorker workers1[m_ThreadCount];
+    PSpeedyWorker workers1[MAX_PARALLEL_KERNELS];
     PSpeedyWorkerConsumer consumer1(&totalCost, m_ThreadCount);
     raft::map m1;
 
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
         m1 += producer1[std::to_string(i).c_str()] >> workers1[i] >> consumer1[std::to_string(i).c_str()];
 
     m1.exe();
@@ -290,11 +292,11 @@ raft::kstatus PSpeedyCallManager::run()
             //{
                 // Command the worker threads (they will not do any operations if to_open is false)
                 PSpeedyWorkerProducer producer(inputData.points, inputData.numRead, to_open, iterationIndex, m_ThreadCount);
-                PSpeedyWorker workers[m_ThreadCount];
+                PSpeedyWorker workers[MAX_PARALLEL_KERNELS];
                 PSpeedyWorkerConsumer consumer(&totalCost, m_ThreadCount);
                 raft::map m;
 
-                for (auto i = 0; i < m_ThreadCount; i++)
+                for (unsigned int i = 0; i < m_ThreadCount; i++)
                     m += producer[std::to_string(i).c_str()] >> workers[i] >> consumer[std::to_string(i).c_str()];
 
                 m.exe();
@@ -319,21 +321,22 @@ raft::kstatus PSpeedyCallManager::run()
 }
 
 PSpeedyWorkerProducer::PSpeedyWorkerProducer(Points* points, size_t numRead, bool work, unsigned int iterationIndex, unsigned int threadCount)
-    : raft::kernel(), m_Points(points), m_NumRead(numRead), m_ThreadCount(threadCount), m_Work(work), m_IterationIndex(iterationIndex)
+    : raft::kernel(), m_Points(points), m_NumRead(numRead), m_ThreadCount(threadCount), m_IterationIndex(iterationIndex), m_Work(work)
 {
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
         output.addPort<PSpeedyWorker_Input>(std::to_string(i).c_str());
 }
 
 raft::kstatus PSpeedyWorkerProducer::run()
 {
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
         output[std::to_string(i).c_str()].push<PSpeedyWorker_Input>(PSpeedyWorker_Input(m_Points, m_NumRead, i, m_NumRead/m_ThreadCount, m_IterationIndex, m_Work));
 
     return raft::stop;
 }
 
-PSpeedyWorker::PSpeedyWorker() : raft::kernel()
+PSpeedyWorker::PSpeedyWorker() 
+    : raft::kernel()
 {
     input.addPort<PSpeedyWorker_Input>("input");
     output.addPort<double>("output");
@@ -388,16 +391,16 @@ raft::kstatus PSpeedyWorker::run()
 }
 
 PSpeedyWorkerConsumer::PSpeedyWorkerConsumer(double* cost, unsigned int threadCount)
-    : raft::kernel_all(), m_ThreadCount(threadCount), m_Cost(cost)
+    : raft::kernel_all(), m_Cost(cost), m_ThreadCount(threadCount)
 {
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
         input.addPort<double>(std::to_string(i).c_str());
 }
 
 raft::kstatus PSpeedyWorkerConsumer::run()
 {
     *m_Cost = 0.0;
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         *m_Cost += input[std::to_string(i).c_str()].peek<double>();
         input[std::to_string(i).c_str()].recycle();
@@ -440,7 +443,7 @@ raft::kstatus SelectFeasible_FastKernel::run()
     int l,r,k;
 
     // not many points, all will be feasible 
-    if (numfeasible == inputData.numRead) 
+    if ((size_t) numfeasible == inputData.numRead) 
     {
         for (int i = k1; i < k2; i++)
             feasible[i] = i;
@@ -452,7 +455,7 @@ raft::kstatus SelectFeasible_FastKernel::run()
 
         accumweight[0] = inputData.points->p[0].weight;
         
-        for (auto i = 1; i < inputData.numRead; i++ ) 
+        for (size_t i = 1; i < inputData.numRead; i++ ) 
             accumweight[i] = accumweight[i-1] + inputData.points->p[i].weight;
 
         totalweight = accumweight[inputData.numRead-1];
@@ -483,7 +486,7 @@ raft::kstatus SelectFeasible_FastKernel::run()
     }
 
     // Will also perform the is_center assignments
-    for (auto i = 0; i < inputData.numRead; i++)
+    for (size_t i = 0; i < inputData.numRead; i++)
         (*m_IsCenter)[inputData.points->p[i].assign] = true;
 
     output["output"].push<SelectFeasible_FastKernel_Output>(SelectFeasible_FastKernel_Output(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, inputData.cost, inputData.hiz, inputData.loz, numfeasible, feasible));
@@ -495,7 +498,7 @@ raft::kstatus SelectFeasible_FastKernel::run()
 PGainCallManager::PGainCallManager(unsigned int CACHE_LINE, unsigned int threadCount, PGainCallManager_Input inputData)
     : raft::kernel(), m_CL(CACHE_LINE / sizeof(double)), m_ThreadCount(threadCount), m_InputData(inputData)
 {
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         // The output will command the worker threads
         output.addPort<PGainWorker1_IO>(std::to_string(i).c_str());
@@ -515,7 +518,7 @@ raft::kstatus PGainCallManager::run()
     // This will need to be deleted at the end of the pgain pipeline
     double* work_mem = new double[stride * (m_ThreadCount + 1)];
 
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
         output[std::to_string(i).c_str()].push<PGainWorker1_IO>(PGainWorker1_IO(m_InputData.points, m_InputData.numRead, m_InputData.z, m_InputData.kCenter, m_InputData.cost, m_InputData.numFeasible, stride, m_CL, work_mem, i, m_InputData.numRead / m_ThreadCount, m_InputData.x));
 
     return raft::stop;
@@ -534,7 +537,6 @@ raft::kstatus PGainWorker1::run()
     PGainWorker1_IO inputData = input["input"].peek<PGainWorker1_IO>();
 
     unsigned int stride = inputData.stride;
-    int cl = inputData.cl;
     unsigned int k1 = inputData.blockSize * inputData.tid;
     unsigned int k2 = k1 + inputData.blockSize;
     if (k2 > inputData.numRead)
@@ -560,7 +562,7 @@ raft::kstatus PGainWorker1::run()
 PGainAccumulator1::PGainAccumulator1(unsigned int threadCount)
     : raft::kernel_all(), m_ThreadCount(threadCount)
 {
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         // Input from the worker threads
         input.addPort<PGainWorker1_IO>(std::to_string(i).c_str());
@@ -576,7 +578,7 @@ raft::kstatus PGainAccumulator1::run()
     double* work_mem;
     unsigned int stride;
 
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         PGainWorker1_IO inputData = input[std::to_string(i).c_str()].peek<PGainWorker1_IO>();
         work_mem = inputData.work_mem;
@@ -584,14 +586,14 @@ raft::kstatus PGainAccumulator1::run()
     }
 
     int accum = 0;
-    for (auto p = 0; p < m_ThreadCount; p++)
+    for (unsigned int p = 0; p < m_ThreadCount; p++)
     {
         int tmp = (int) work_mem[p * stride];
         work_mem[p * stride] = accum;
         accum += tmp;
     }
 
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         PGainWorker1_IO inputData = input[std::to_string(i).c_str()].peek<PGainWorker1_IO>();
         output[std::to_string(i).c_str()].push<PGainWorker1_IO>(inputData);
@@ -640,7 +642,7 @@ raft::kstatus PGainWorker2::run()
 PGainAccumulator2::PGainAccumulator2(unsigned int threadCount)
     : raft::kernel_all(), m_ThreadCount(threadCount)
 {
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         // Input from the worker threads
         input.addPort<PGainWorker1_IO>(std::to_string(i).c_str());
@@ -656,7 +658,7 @@ raft::kstatus PGainAccumulator2::run()
     double* work_mem;
     unsigned int stride;
 
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         PGainWorker1_IO inputData = input[std::to_string(i).c_str()].peek<PGainWorker1_IO>();
         work_mem = inputData.work_mem;
@@ -665,7 +667,7 @@ raft::kstatus PGainAccumulator2::run()
 
     memset(work_mem + m_ThreadCount * stride, 0, stride * sizeof(double));
 
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         PGainWorker1_IO inputData = input[std::to_string(i).c_str()].peek<PGainWorker1_IO>();
         output[std::to_string(i).c_str()].push<PGainWorker1_IO>(inputData);
@@ -734,7 +736,7 @@ raft::kstatus PGainWorker3::run()
 PGainAccumulator3::PGainAccumulator3(unsigned int threadCount)
     : raft::kernel_all(), m_ThreadCount(threadCount)
 {
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         // Input from the worker threads
         input.addPort<PGainWorker3_Output>(std::to_string(i).c_str());
@@ -747,7 +749,7 @@ PGainAccumulator3::PGainAccumulator3(unsigned int threadCount)
 raft::kstatus PGainAccumulator3::run()
 {
     //std::cout << "Executing PGainAccumulator3 run" << std::endl;
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         PGainWorker3_Output inputData = input[std::to_string(i).c_str()].peek<PGainWorker3_Output>();
         output[std::to_string(i).c_str()].push<PGainWorker3_Output>(inputData);
@@ -785,7 +787,7 @@ raft::kstatus PGainWorker4::run()
         {
             double low = *(inputData.z);
             //aggregate from all threads
-            for (auto p = 0; p < m_ThreadCount; p++) 
+            for (unsigned int p = 0; p < m_ThreadCount; p++) 
                 low += inputData.work_mem[(*m_CenterTable)[i] + p * inputData.stride];
             
             inputData.gl_lower[(*m_CenterTable)[i]] = low;
@@ -817,7 +819,7 @@ raft::kstatus PGainWorker4::run()
 PGainAccumulator4::PGainAccumulator4(unsigned int threadCount)
     : raft::kernel_all(), m_ThreadCount(threadCount)
 {
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         // Input from the worker threads
         input.addPort<PGainWorker4_Output>(std::to_string(i).c_str());
@@ -833,14 +835,14 @@ raft::kstatus PGainAccumulator4::run()
     unsigned int gl_number_of_centers_to_close = 0;
     double gl_cost_of_opening_x = *(input["0"].peek<PGainWorker4_Output>().z);
 
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         PGainWorker4_Output inputData = input[std::to_string(i).c_str()].peek<PGainWorker4_Output>();
         gl_number_of_centers_to_close += inputData.number_of_centers_to_close;
         gl_cost_of_opening_x += inputData.cost_of_opening_x;
     }
 
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         PGainWorker4_Output inputData = input[std::to_string(i).c_str()].peek<PGainWorker4_Output>();
         output[std::to_string(i).c_str()].push<PGainWorker4_Output>(PGainWorker4_Output(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, inputData.cost, inputData.numFeasible, inputData.stride, inputData.cl, inputData.work_mem, inputData.tid, inputData.blockSize, inputData.x, inputData.lower, inputData.gl_lower, gl_cost_of_opening_x, gl_number_of_centers_to_close));
@@ -899,9 +901,9 @@ raft::kstatus PGainWorker5::run()
 }
 
 PGainAccumulator5::PGainAccumulator5(double* result, unsigned int threadCount)
-    : raft::kernel_all(), m_ThreadCount(threadCount), m_Result(result)
+    : raft::kernel_all(), m_Result(result), m_ThreadCount(threadCount)
 {
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         // Input from the worker threads
         input.addPort<PGainWorker4_Output>(std::to_string(i).c_str());
@@ -916,7 +918,7 @@ raft::kstatus PGainAccumulator5::run()
     unsigned int gl_number_of_centers_to_close = 0;
     double gl_cost_of_opening_x = 0.0;
 
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         PGainWorker4_Output inputData = input[std::to_string(i).c_str()].peek<PGainWorker4_Output>();
         kCenter = inputData.kCenter;
@@ -936,7 +938,7 @@ raft::kstatus PGainAccumulator5::run()
 
     delete[] work_mem;
 
-    for (auto i = 0; i < m_ThreadCount; i++)
+    for (unsigned int i = 0; i < m_ThreadCount; i++)
         input[std::to_string(i).c_str()].recycle();
 
     *m_Result = -gl_cost_of_opening_x;
@@ -945,7 +947,7 @@ raft::kstatus PGainAccumulator5::run()
 }
 
 PFLCallManager::PFLCallManager(unsigned int CL, bool** isCenter, bool** switchMembership, int** centerTable, unsigned int threadCount, PFLCallManager_Input inputData)
-    : raft::kernel(), m_CL(CL), m_IsCenter(isCenter), m_SwitchMembership(switchMembership), m_CenterTable(centerTable), m_ThreadCount(threadCount), m_InputData(inputData)
+    : raft::kernel(), m_CL(CL), m_IsCenter(isCenter), m_CenterTable(centerTable), m_SwitchMembership(switchMembership), m_ThreadCount(threadCount), m_InputData(inputData)
 {
     // This is the output of pFL
     output.addPort<double>("output");
@@ -975,19 +977,19 @@ raft::kstatus PFLCallManager::run()
             double result = 0.0;
 
             PGainCallManager manager(m_CL, m_ThreadCount, PGainCallManager_Input(m_InputData.points, m_InputData.numRead, m_InputData.z, m_InputData.kCenter, cost, m_InputData.numFeasible, m_InputData.feasible[iterationIndex % m_InputData.numFeasible], 0));
-            PGainWorker1* worker1s[m_ThreadCount];
+            PGainWorker1* worker1s[MAX_PARALLEL_KERNELS];
             PGainAccumulator1 accum1(m_ThreadCount);
-            PGainWorker2* worker2s[m_ThreadCount];
+            PGainWorker2* worker2s[MAX_PARALLEL_KERNELS];
             PGainAccumulator2 accum2(m_ThreadCount);
-            PGainWorker3* worker3s[m_ThreadCount];
+            PGainWorker3* worker3s[MAX_PARALLEL_KERNELS];
             PGainAccumulator3 accum3(m_ThreadCount);
-            PGainWorker4* worker4s[m_ThreadCount];
+            PGainWorker4* worker4s[MAX_PARALLEL_KERNELS];
             PGainAccumulator4 accum4(m_ThreadCount);
-            PGainWorker5* worker5s[m_ThreadCount];
+            PGainWorker5* worker5s[MAX_PARALLEL_KERNELS];
             PGainAccumulator5 accum5(&result, m_ThreadCount);
             raft::map m;
 
-            for (auto i = 0; i < m_ThreadCount; i++)
+            for (unsigned int i = 0; i < m_ThreadCount; i++)
             {
                 const char* val = std::to_string(i).c_str();
                 worker1s[i] = new PGainWorker1(m_IsCenter, m_CenterTable);
@@ -1007,7 +1009,7 @@ raft::kstatus PFLCallManager::run()
             // pgain has completed
             iterationIndex++;
 
-            for (auto i = 0; i < m_ThreadCount; i++)
+            for (unsigned int i = 0; i < m_ThreadCount; i++)
             {
                 delete worker1s[i];
                 delete worker2s[i];
@@ -1038,7 +1040,7 @@ raft::kstatus PFLCallConsumer::run()
 }
 
 PKMedianAccumulator2::PKMedianAccumulator2(unsigned int CACHE_LINE, long kmin, long kmax, long* kfinal, unsigned int ITER, bool** isCenter, int** centerTable, bool** switchMembership, unsigned int threadCount)
-    : raft::kernel(), m_CL(CACHE_LINE), m_kMin(kmin), m_kMax(kmax), m_ITER(ITER), m_kFinal(kfinal), m_IsCenter(isCenter), m_CenterTable(centerTable), m_SwitchMembership(switchMembership), m_ThreadCount(threadCount)
+    : raft::kernel(), m_kMin(kmin), m_kMax(kmax), m_kFinal(kfinal), m_ITER(ITER), m_IsCenter(isCenter), m_SwitchMembership(switchMembership), m_CenterTable(centerTable), m_CL(CACHE_LINE), m_ThreadCount(threadCount)
 {
     // This is the entry point to this kernel from selectfeasible_fast
     input.addPort<SelectFeasible_FastKernel_Output>("input");
@@ -1145,9 +1147,9 @@ raft::kstatus ContCentersKernel::run()
         numRead = m_Centers->num;
 
     float relweight = 0.0;
-    for (auto i = 0; i < numRead; i++)
+    for (size_t i = 0; i < numRead; i++)
     {
-        if (points->p[i].assign != i)
+        if (points->p[i].assign != (long) i)
         {
             relweight = points->p[points->p[i].assign].weight + points->p[i].weight;
             relweight = points->p[i].weight / relweight;
@@ -1191,7 +1193,6 @@ CopyCentersKernel::CopyCentersKernel(Points* points, Points* centers, long* cent
 raft::kstatus CopyCentersKernel::run()
 {
     std::cout << "Copying centers" << std::endl;
-    size_t numRead = input["input"].peek<size_t>();
 
     bool* is_a_median = new bool[m_Points->num];
     for (auto i = 0; i < m_Points->num; i++)
