@@ -11,7 +11,6 @@ PStreamReader::PStreamReader(PStream* stream, float* block, int dim, long chunkS
 raft::kstatus PStreamReader::run()
 {
     size_t numRead = 0;
-    std::cout << "Executing PStreamReader run" << std::endl;
     if (*m_Continue)
     {
         // Get the number of points to operate on
@@ -50,23 +49,20 @@ LocalSearchStarter::LocalSearchStarter(Points* points, Points* centers, unsigned
 
 raft::kstatus LocalSearchStarter::run()
 {
-    std::cout << "Executing LocalSearchStarter run" << std::endl;
     // Get our input data
     PStreamReader_Output inputData = input["input"].peek<PStreamReader_Output>();
 
     // Calculate the blockSize for each "thread"
-    size_t blockSize = inputData.numRead / (size_t) m_ThreadCount;
+    size_t blockSize = inputData.numRead / (size_t) m_ThreadCount + 1;
 
     if (inputData.useCenters)
     {
-        std::cout << "Using centers for local search" << std::endl;
         *m_SwitchMembership = new bool[m_Centers->num];
         *m_IsCenter = new bool[m_Centers->num];
         *m_CenterTable = new int[m_Centers->num];
     }
     else
     {
-        std::cout << "Using points for local search" << std::endl;
         m_Points->num = inputData.numRead;
         *m_SwitchMembership = new bool[inputData.numRead];
         *m_IsCenter = new bool[inputData.numRead];
@@ -104,14 +100,13 @@ PKMedianWorker1::PKMedianWorker1()
 
 raft::kstatus PKMedianWorker1::run()
 {
-    std::cout << "Executing PKMedianWorker1 run" << std::endl;
     // Get input data
     LocalSearchStarter_Output inputData = input["input"].peek<LocalSearchStarter_Output>();
 
     // Calculate bounds for iteration
     size_t k1 = inputData.blockSize * inputData.tid;
     size_t k2 = k1 + inputData.blockSize;
-    if (k2 > inputData.numRead) 
+    if (k2 > inputData.numRead) // this causes a bug, actually doesn't include all of the points on multi-threaded loads... 
         k2 = inputData.numRead;
 
     double hiz = 0.0;
@@ -144,7 +139,6 @@ PKMedianAccumulator1::PKMedianAccumulator1(long kmin, long kmax, long* kFinal, u
 
 raft::kstatus PKMedianAccumulator1::run()
 {
-    std::cout << "Executing PKMedianAccumulator1 run" << std::endl;
     // Save the input data so we can recycle after reading once
     double* hiz = new double(0.0);
     double* loz = new double(0.0);
@@ -162,8 +156,6 @@ raft::kstatus PKMedianAccumulator1::run()
         *hiz += inputData.hiz;
         input[std::to_string(i).c_str()].recycle();
     }
-
-    std::cout << "Total hiz: " << *hiz << std::endl;
 
     *z = (*hiz + *loz) / 2.0;
 
@@ -185,7 +177,6 @@ raft::kstatus PKMedianAccumulator1::run()
 
         return raft::proceed;
     }
-    std::cout << "Pushing to PSpeedyCallManager" << std::endl;
     output["output_pspeedy"].push<PSpeedyCallManager_Input>(PSpeedyCallManager_Input(points, numRead, z, kCenter, hiz, loz));
 
     return raft::proceed;
@@ -203,15 +194,11 @@ PSpeedyCallManager::PSpeedyCallManager(unsigned int threadCount, long kmin, unsi
 
 raft::kstatus PSpeedyCallManager::run()
 {
-    std::cout << "Executing PSpeedyCallManager run" << std::endl;
-    
     // This code runs when PSpeedyCallManager is given data from the call in pkmedian 
     // Should only be called once per iteration
     PSpeedyCallManager_Input inputData = input["input"].peek<PSpeedyCallManager_Input>();
     unsigned int iterationIndex = 0;
     unsigned int pSpeedyExecutionCount = 0;
-
-    std::cout << "Z value: " << *(inputData.z) << std::endl;
 
     double totalCost = 0.0;
 
@@ -229,8 +216,6 @@ raft::kstatus PSpeedyCallManager::run()
 
     m1.exe();
 
-    std::cout << "Cost after pspeedy: " << totalCost << std::endl;
-
     iterationIndex++;
     *(inputData.kCenter) = 1;
 
@@ -245,8 +230,6 @@ raft::kstatus PSpeedyCallManager::run()
             // At this point, an entire function call of "pspeedy" has been completed
             // Now, we need to decide whether to perform another based upon the values of kCenter, kmin, and SP
             pSpeedyExecutionCount++;
-            std::cout << "Cost after pspeedy: " << totalCost << std::endl;
-            std::cout << "KCenters after pspeedy: " << *(inputData.kCenter) << std::endl;
             
             if ((*(inputData.kCenter) < m_kMin) && (pSpeedyExecutionCount < m_SP) && doneWithFirstLoop)
             {
@@ -311,9 +294,6 @@ raft::kstatus PSpeedyCallManager::run()
 
     input["input"].recycle();
     
-    std::cout << "KCenters after all PSpeedy: " << *(inputData.kCenter) << std::endl;
-    std::cout << "Cost after all PSpeedy: " << totalCost << std::endl;
-
     // Push our output
     output["output"].push<PSpeedyCallManager_Output>(PSpeedyCallManager_Output(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, totalCost, inputData.hiz, inputData.loz));
     
@@ -344,7 +324,6 @@ PSpeedyWorker::PSpeedyWorker()
 
 raft::kstatus PSpeedyWorker::run()
 {
-    //std::cout << "Executing PSpeedyWorker run" << std::endl;
     PSpeedyWorker_Input inputData = input["input"].peek<PSpeedyWorker_Input>();
     double cost = 0.0;
     unsigned int k1 = inputData.blockSize * inputData.tid;
@@ -418,7 +397,6 @@ SelectFeasible_FastKernel::SelectFeasible_FastKernel(int kmin, unsigned int ITER
 
 raft::kstatus SelectFeasible_FastKernel::run()
 {
-    std::cout << "Executing SelectFeasible run" << std::endl;
     PSpeedyCallManager_Output inputData = input["input"].peek<PSpeedyCallManager_Output>();
     int numfeasible = (int) inputData.numRead;
 
@@ -519,7 +497,7 @@ raft::kstatus PGainCallManager::run()
     double* work_mem = new double[stride * (m_ThreadCount + 1)];
 
     for (unsigned int i = 0; i < m_ThreadCount; i++)
-        output[std::to_string(i).c_str()].push<PGainWorker1_IO>(PGainWorker1_IO(m_InputData.points, m_InputData.numRead, m_InputData.z, m_InputData.kCenter, m_InputData.cost, m_InputData.numFeasible, stride, m_CL, work_mem, i, m_InputData.numRead / m_ThreadCount, m_InputData.x));
+        output[std::to_string(i).c_str()].push<PGainWorker1_IO>(PGainWorker1_IO(m_InputData.points, m_InputData.numRead, m_InputData.z, m_InputData.kCenter, m_InputData.cost, m_InputData.numFeasible, stride, m_CL, work_mem, i, m_InputData.numRead / m_ThreadCount + 1, m_InputData.x));
 
     return raft::stop;
 }
@@ -533,7 +511,6 @@ PGainWorker1::PGainWorker1(bool** is_center, int** center_table)
 
 raft::kstatus PGainWorker1::run()
 {
-    //std::cout << "Executing PGainWorker1 run" << std::endl;
     PGainWorker1_IO inputData = input["input"].peek<PGainWorker1_IO>();
 
     unsigned int stride = inputData.stride;
@@ -550,8 +527,6 @@ raft::kstatus PGainWorker1::run()
             (*m_CenterTable)[i] = count++;
     }
     inputData.work_mem[inputData.tid * stride] = count;
-
-    //std::cout << "Count: " << count << std::endl;
 
     output["output"].push<PGainWorker1_IO>(PGainWorker1_IO(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, inputData.cost, inputData.numFeasible, inputData.stride, inputData.cl, inputData.work_mem, inputData.tid, inputData.blockSize, inputData.x));
     input["input"].recycle();
@@ -574,7 +549,6 @@ PGainAccumulator1::PGainAccumulator1(unsigned int threadCount)
 
 raft::kstatus PGainAccumulator1::run()
 {
-    //std::cout << "Executing PGainAccumulator1 run" << std::endl;
     double* work_mem;
     unsigned int stride;
 
@@ -612,7 +586,6 @@ PGainWorker2::PGainWorker2(bool** is_center, int** center_table, bool** switch_m
 
 raft::kstatus PGainWorker2::run()
 {
-    //std::cout << "Executing PGainWorker2 run" << std::endl;
     PGainWorker1_IO inputData = input["input"].peek<PGainWorker1_IO>();
 
     unsigned int stride = inputData.stride;
@@ -627,12 +600,8 @@ raft::kstatus PGainWorker2::run()
             (*m_CenterTable)[i] += (int) inputData.work_mem[inputData.tid * stride];
     }
 
-    //for (auto i = 0; i < inputData.numRead; i++)
-    //    std::cout << "Center Table: " << (*m_CenterTable)[i] << std::endl;
-
     memset(*m_SwitchMembership + k1, 0, (k2 - k1) * sizeof(bool));
-    memset(inputData.work_mem + inputData.tid * stride, 0, stride * sizeof(double)); // getting stuck here, sometimes segfaults
-
+    memset(inputData.work_mem + inputData.tid * stride, 0, stride * sizeof(double));
     output["output"].push<PGainWorker1_IO>(PGainWorker1_IO(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, inputData.cost, inputData.numFeasible, inputData.stride, inputData.cl, inputData.work_mem, inputData.tid, inputData.blockSize, inputData.x));
     input["input"].recycle();
     
@@ -654,7 +623,6 @@ PGainAccumulator2::PGainAccumulator2(unsigned int threadCount)
 
 raft::kstatus PGainAccumulator2::run()
 {
-    //std::cout << "Executing PGainAccumulator2 run" << std::endl;
     double* work_mem;
     unsigned int stride;
 
@@ -686,7 +654,6 @@ PGainWorker3::PGainWorker3(bool** is_center, int** center_table, bool** switch_m
 
 raft::kstatus PGainWorker3::run()
 {
-    //std::cout << "Executing PGainWorker3 run" << std::endl;
     PGainWorker1_IO inputData = input["input"].peek<PGainWorker1_IO>();
 
     unsigned int k1 = inputData.blockSize * inputData.tid;
@@ -748,7 +715,6 @@ PGainAccumulator3::PGainAccumulator3(unsigned int threadCount)
 
 raft::kstatus PGainAccumulator3::run()
 {
-    //std::cout << "Executing PGainAccumulator3 run" << std::endl;
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         PGainWorker3_Output inputData = input[std::to_string(i).c_str()].peek<PGainWorker3_Output>();
@@ -768,7 +734,6 @@ PGainWorker4::PGainWorker4(bool** is_center, int** center_table, unsigned int th
 
 raft::kstatus PGainWorker4::run()
 {
-    //std::cout << "Executing PGainWorker4 run" << std::endl;
     PGainWorker3_Output inputData = input["input"].peek<PGainWorker3_Output>();
 
     unsigned int k1 = inputData.blockSize * inputData.tid;
@@ -777,9 +742,6 @@ raft::kstatus PGainWorker4::run()
         k2 = inputData.numRead;
 
     unsigned int number_of_centers_to_close = 0;
-
-    //std::cout << "Number of centers to close prior: " << number_of_centers_to_close << std::endl;
-    //std::cout << "Cost of opening x prior: " << inputData.cost_of_opening_x << std::endl;
 
     for (auto i = k1; i < k2; i++) 
     {
@@ -802,9 +764,6 @@ raft::kstatus PGainWorker4::run()
             }
         }
     }
-
-    //std::cout << "Number of centers to close: " << number_of_centers_to_close << std::endl;
-    //std::cout << "Cost of opening x: " << inputData.cost_of_opening_x << std::endl;
 
     //use the rest of working memory to store the following
     inputData.work_mem[inputData.tid * inputData.stride + *(inputData.kCenter)] = number_of_centers_to_close;
@@ -831,7 +790,6 @@ PGainAccumulator4::PGainAccumulator4(unsigned int threadCount)
 
 raft::kstatus PGainAccumulator4::run()
 {
-    //std::cout << "Executing PGainAccumulator4 run" << std::endl;
     unsigned int gl_number_of_centers_to_close = 0;
     double gl_cost_of_opening_x = *(input["0"].peek<PGainWorker4_Output>().z);
 
@@ -861,7 +819,6 @@ PGainWorker5::PGainWorker5(bool** is_center, int** center_table, bool** switch_m
 
 raft::kstatus PGainWorker5::run()
 {
-    //std::cout << "Executing PGainWorker5 run" << std::endl;
     PGainWorker4_Output inputData = input["input"].peek<PGainWorker4_Output>();
 
     unsigned int k1 = inputData.blockSize * inputData.tid;
@@ -912,7 +869,6 @@ PGainAccumulator5::PGainAccumulator5(double* result, unsigned int threadCount)
 
 raft::kstatus PGainAccumulator5::run()
 {
-    //std::cout << "Executing PGainAccumulator5 run" << std::endl;
     long* kCenter;
     double* work_mem;
     unsigned int gl_number_of_centers_to_close = 0;
@@ -955,16 +911,9 @@ PFLCallManager::PFLCallManager(unsigned int CL, bool** isCenter, bool** switchMe
 
 raft::kstatus PFLCallManager::run()
 {
-    std::cout << "Executing PFLCallManager run" << std::endl;
-
     unsigned int iterationIndex = 0;
     double cost = m_InputData.cost;
     double change = m_InputData.cost;
-
-    std::cout << "Z: " << *(m_InputData.z) << std::endl;
-    std::cout << "Initial cost: " << cost << std::endl;
-    std::cout << "Iter: " << m_InputData.iter << std::endl;
-    std::cout << "E: " << m_InputData.e << std::endl;
 
     while (change / cost > 1.0 * m_InputData.e)
     {
@@ -1020,8 +969,6 @@ raft::kstatus PFLCallManager::run()
         }
         cost -= change;
     }
-    std::cout << "PFL Cost Result: " << cost << std::endl;
-
     output["output"].push<double>(cost);
     return raft::stop;
 }
@@ -1050,15 +997,12 @@ PKMedianAccumulator2::PKMedianAccumulator2(unsigned int CACHE_LINE, long kmin, l
 
 raft::kstatus PKMedianAccumulator2::run()
 {
-    std::cout << "Executing PMedianAccumulator2 kernel" << std::endl;
-
     // This is the entry in PKMedianPt3
     SelectFeasible_FastKernel_Output inputData = input["input"].peek<SelectFeasible_FastKernel_Output>();
     double cost = inputData.cost;
 
     while (true)
     {
-        std::cout << "Calling pFL" << std::endl;
         PFLCallManager manager(m_CL, m_IsCenter, m_SwitchMembership, m_CenterTable, m_ThreadCount, PFLCallManager_Input(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, cost, inputData.numFeasible, inputData.feasible, (long) (m_ITER * m_kMax * log((double) m_kMax)), 0.1));
         PFLCallConsumer consumer(&cost);
         raft::map m;
@@ -1068,7 +1012,6 @@ raft::kstatus PKMedianAccumulator2::run()
         bool should_run_again = ((*(inputData.kCenter) <= (1.1) * m_kMax) && (*(inputData.kCenter) >= (0.9) * m_kMin)) || ((*(inputData.kCenter) <= m_kMax + 2) && (*(inputData.kCenter) >= m_kMin - 2));
         if (should_run_again)
         {
-            std::cout << "Calling pFL a second time" << std::endl;
             PFLCallManager manager1(m_CL, m_IsCenter, m_SwitchMembership, m_CenterTable, m_ThreadCount, PFLCallManager_Input(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, cost, inputData.numFeasible, inputData.feasible, (long) (m_ITER * m_kMax * log((double) m_kMax)), 0.001));
             PFLCallConsumer consumer1(&cost);
             raft::map m1;
@@ -1123,7 +1066,6 @@ ContCentersKernel::ContCentersKernel(Points* points, Points* centers, long* kFin
 
 raft::kstatus ContCentersKernel::run()
 {
-    std::cout << "Executing ContCentersKernel" << std::endl;
     ContCentersKernel_Input inputData;
 
     if (input["input_pkmedian2"].size() > 0)
@@ -1169,17 +1111,9 @@ raft::kstatus ContCentersKernel::run()
     }
 
     if (points == m_Points)
-    {
-        std::cout << "Sending data to copy centers" << std::endl;
         output["output_copy"].push<size_t>(numRead);
-    }
     else
-    {
-        std::cout << "Sending data to output centers" << std::endl;
         output["output_out"].push<size_t>(numRead);
-    }
-    
-    //input["input"].recycle();
 
     return raft::proceed;
 }
@@ -1192,8 +1126,6 @@ CopyCentersKernel::CopyCentersKernel(Points* points, Points* centers, long* cent
 
 raft::kstatus CopyCentersKernel::run()
 {
-    std::cout << "Copying centers" << std::endl;
-
     bool* is_a_median = new bool[m_Points->num];
     for (auto i = 0; i < m_Points->num; i++)
         is_a_median[i] = 0;
@@ -1219,8 +1151,6 @@ raft::kstatus CopyCentersKernel::run()
 
     input["input"].recycle();
 
-    std::cout << "Done copying centers" << std::endl;
-
     return raft::proceed;
 }
 
@@ -1232,7 +1162,6 @@ OutCenterIDsKernel::OutCenterIDsKernel(Points* centers, long* centerIDs, char* o
 
 raft::kstatus OutCenterIDsKernel::run()
 {
-    std::cout << "Outputing center IDs" << std::endl;
     input["input"].recycle();
 
     FILE* fp = fopen(m_Outfile, "w");
@@ -1263,7 +1192,6 @@ raft::kstatus OutCenterIDsKernel::run()
     }
     fclose(fp);
 
-    std::cout << "Done!" << std::endl;
     delete[] is_a_median;
 
     return raft::stop;
