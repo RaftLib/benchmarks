@@ -525,6 +525,31 @@ void ClearParticlesMT(int tid)
       }
 }
 
+ClearParticlesMTWorker::ClearParticlesMTWorker()
+  : raft::kernel()
+{
+  // Create our input port (tid)
+  input.addPort<int>("input");
+
+  // Create the output port (tid)
+  output.addPort<int>("output");
+}
+
+raft::kstatus ClearParticlesMTWorker::run()
+{
+  // Get the tid
+  int tid = input["input"].peek<int>();
+  
+  // Perform operation
+  ClearParticlesMT(tid);
+
+  // Push output and cleanup
+  output["output"].push<int>(tid);
+  input["input"].recycle();
+
+  return raft::proceed;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 void RebuildGridMT(int tid)
@@ -684,6 +709,31 @@ void InitDensitiesAndForcesMT(int tid)
       }
 }
 
+InitDensitiesAndForcesMTWorker::InitDensitiesAndForcesMTWorker()
+  : raft::kernel()
+{
+  // Create our input port (tid)
+  input.addPort<int>("input");
+
+  // Create the output port (tid)
+  output.addPort<int>("output");
+}
+
+raft::kstatus InitDensitiesAndForcesMTWorker::run()
+{
+  // Get the tid
+  int tid = input["input"].peek<int>();
+  
+  // Perform operation
+  InitDensitiesAndForcesMT(tid);
+
+  // Push output and cleanup
+  output["output"].push<int>(tid);
+  input["input"].recycle();
+
+  return raft::proceed;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 void ComputeDensitiesMT(int tid)
@@ -775,6 +825,31 @@ void ComputeDensities2MT(int tid)
           }
         }
       }
+}
+
+ComputeDensities2MTWorker::ComputeDensities2MTWorker()
+  : raft::kernel()
+{
+  // Create our input port (tid)
+  input.addPort<int>("input");
+
+  // Create the output port (tid)
+  output.addPort<int>("output");
+}
+
+raft::kstatus ComputeDensities2MTWorker::run()
+{
+  // Get the tid
+  int tid = input["input"].peek<int>();
+  
+  // Perform operation
+  ComputeDensities2MT(tid);
+
+  // Push output and cleanup
+  output["output"].push<int>(tid);
+  input["input"].recycle();
+
+  return raft::proceed;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -974,6 +1049,31 @@ void ProcessCollisionsMT(int tid)
 }
 #endif
 
+ProcessCollisionsMTWorker::ProcessCollisionsMTWorker()
+  : raft::kernel()
+{
+  // Create our input port (tid)
+  input.addPort<int>("input");
+
+  // Create the output port (tid)
+  output.addPort<int>("output");
+}
+
+raft::kstatus ProcessCollisionsMTWorker::run()
+{
+  // Get the tid
+  int tid = input["input"].peek<int>();
+  
+  // Perform operation
+  ProcessCollisionsMT(tid);
+
+  // Push output and cleanup
+  output["output"].push<int>(tid);
+  input["input"].recycle();
+
+  return raft::proceed;
+}
+
 #define USE_ImpeneratableWall
 #if defined(USE_ImpeneratableWall)
 void ProcessCollisions2MT(int tid)
@@ -1069,6 +1169,32 @@ void ProcessCollisions2MT(int tid)
 	}
   }
 }
+
+ProcessCollisions2MTWorker::ProcessCollisions2MTWorker()
+  : raft::kernel()
+{
+  // Create our input port (tid)
+  input.addPort<int>("input");
+
+  // Create the output port (tid)
+  output.addPort<int>("output");
+}
+
+raft::kstatus ProcessCollisions2MTWorker::run()
+{
+  // Get the tid
+  int tid = input["input"].peek<int>();
+  
+  // Perform operation
+  ProcessCollisions2MT(tid);
+
+  // Push output and cleanup
+  output["output"].push<int>(tid);
+  input["input"].recycle();
+
+  return raft::proceed;
+}
+
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1105,6 +1231,31 @@ void AdvanceParticlesMT(int tid)
           }
         }
       }
+}
+
+AdvanceParticlesMTWorker::AdvanceParticlesMTWorker()
+  : raft::kernel()
+{
+  // Create our input port (tid)
+  input.addPort<int>("input");
+
+  // Create the output port (tid)
+  output.addPort<int>("output");
+}
+
+raft::kstatus AdvanceParticlesMTWorker::run()
+{
+  // Get the tid
+  int tid = input["input"].peek<int>();
+  
+  // Perform operation
+  AdvanceParticlesMT(tid);
+
+  // Push output and cleanup
+  output["output"].push<int>(tid);
+  input["input"].recycle();
+
+  return raft::proceed;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
