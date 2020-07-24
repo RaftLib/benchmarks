@@ -40,6 +40,24 @@ struct SynchronizeKernelData
   SynchronizeKernelData(int tid, bool done) : tid(tid), done(done) {}
 };
 
+class SimpleAccumulatorKernel : public raft::kernel_all
+{
+private:
+  int m_ThreadCount;
+public:
+  SimpleAccumulatorKernel(int threadCount);
+  virtual raft::kstatus run();
+};
+
+class AdvancedAccumulatorKernel : public raft::kernel_all
+{
+private:
+  int m_ThreadCount;
+public:
+  AdvancedAccumulatorKernel(int threadCount);
+  virtual raft::kstatus run();
+};
+
 class ClearParticlesMTWorker : public raft::kernel
 {
 public:
@@ -65,7 +83,7 @@ public:
   virtual raft::kstatus run();
 };
 
-class CellModificationKernel : public raft::parallel_k
+class CellModificationKernel : public raft::kernel
 {
 private:
   int m_ThreadCount;
@@ -100,7 +118,7 @@ public:
   virtual raft::kstatus run();
 };
 
-class DensityModificationKernel : public raft::parallel_k
+class DensityModificationKernel : public raft::kernel
 {
 private:
   int m_ThreadCount;
@@ -135,7 +153,7 @@ public:
   virtual raft::kstatus run();
 };
 
-class AccelerationModificationKernel : public raft::parallel_k
+class AccelerationModificationKernel : public raft::kernel
 {
 private:
   int m_ThreadCount;

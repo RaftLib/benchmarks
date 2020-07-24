@@ -512,6 +512,72 @@ void CleanUpSim()
 
 ////////////////////////////////////////////////////////////////////////////////
 
+SimpleAccumulatorKernel::SimpleAccumulatorKernel(int threadCount)
+  : raft::kernel_all(), m_ThreadCount(threadCount)
+{
+  // Add our IO ports
+  for (auto i = 0; i < m_ThreadCount; i++)
+  {
+    const char* val = std::to_string(i).c_str();
+    input.addPort<int>(val);
+    output.addPort<int>(val);
+  }
+}
+
+raft::kstatus SimpleAccumulatorKernel::run()
+{
+  // Pass through the TIDs
+  for (auto i = 0; i < m_ThreadCount; i++)
+  {
+    const char* val = std::to_string(i).c_str();
+    output[val].push<int>(i);
+    input[val].recycle();
+  }
+
+  return raft::proceed;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+AdvancedAccumulatorKernel::AdvancedAccumulatorKernel(int threadCount)
+  : raft::kernel_all(), m_ThreadCount(threadCount)
+{
+  // Add our worker IO ports
+  for (auto i = 0; i < m_ThreadCount; i++)
+  {
+    const char* val = std::to_string(i).c_str();
+    input.addPort<int>(val);
+    output.addPort<int>(val);
+  }
+
+  // Input from our modification kernel
+  input.addPort<bool>("input_mod");
+}
+
+raft::kstatus AdvancedAccumulatorKernel::run()
+{
+  // If the modification kernel returned false, something definitely went wrong
+  if (!input["input_mod"].peek<bool>())
+  {
+    std::cerr << "ERROR: AdvancedAccumulatorKernel got false output from modification kernel!" << std::endl;
+    exit(EXIT_FAILURE);
+  }
+
+  input["input_mod"].recycle();
+
+  // Pass through the TIDs
+  for (auto i = 0; i < m_ThreadCount; i++)
+  {
+    const char* val = std::to_string(i).c_str();
+    output[val].push<int>(i);
+    input[val].recycle();
+  }
+
+  return raft::proceed;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 void ClearParticlesMT(int tid)
 {
   for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
@@ -746,6 +812,8 @@ raft::kstatus RebuildGridMTWorker::run()
   // Push our output and cleanup
   output["output_tid"].push<int>(tid);
   input["input"].recycle();
+
+  return raft::proceed;
 }
 
 CellModificationKernel::CellModificationKernel(int threadCount)
