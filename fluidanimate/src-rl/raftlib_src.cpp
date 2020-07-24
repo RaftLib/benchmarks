@@ -8,28 +8,18 @@
 
 #include <iostream>
 #include <fstream>
-#if defined(WIN32)
-#define NOMINMAX
-#include <windows.h>
-#endif
 #include <math.h>
-#include <pthread.h>
 #include <assert.h>
 #include <float.h>
 
 #include "fluid.hpp"
 #include "cellpool.hpp"
-#include "parsec_barrier.hpp"
 
 #ifdef ENABLE_VISUALIZATION
 #include "fluidview.hpp"
 #endif
 
-#ifdef ENABLE_PARSEC_HOOKS
-#include <hooks.h>
-#endif
-
-#include "raftlib.hpp"
+#include "raftlib_src.hpp"
 
 //Uncomment to add code to check that Courant–Friedrichs–Lewy condition is satisfied at runtime
 //#define ENABLE_CFL_CHECK
@@ -64,13 +54,6 @@ int ZDIVS = 1;  // number of partitions in Z
 
 Grid *grids;
 bool  *border;
-pthread_attr_t attr;
-pthread_t *thread;
-pthread_mutex_t **mutex;  // used to lock cells in RebuildGrid and also particles in other functions
-pthread_barrier_t barrier;  // global barrier used by all threads
-#ifdef ENABLE_VISUALIZATION
-pthread_barrier_t visualization_barrier;  // global barrier to separate (serial) visualization phase from (parallel) fluid simulation
-#endif
 
 typedef struct __thread_args {
   int tid;      //thread id, determines work partition
@@ -124,7 +107,6 @@ void InitSim(char const *fileName, unsigned int threadnum)
   if(XDIVS*ZDIVS != threadnum) XDIVS*=2;
   assert(XDIVS * ZDIVS == threadnum);
 
-  thread = new pthread_t[NUM_GRIDS];
   grids = new struct Grid[NUM_GRIDS];
   assert(sizeof(Grid) <= CACHELINE_SIZE); // as we put and aligh grid on the cacheline size to avoid false-sharing
                                           // if asserts fails - increase pp union member in Grid declarationi
@@ -249,50 +231,17 @@ void InitSim(char const *fileName, unsigned int threadnum)
            } // for(int dk = -1; dk <= 1; ++dk)
         }
 
-  pthread_attr_init(&attr);
-  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
-  mutex = new pthread_mutex_t *[numCells];
-  for(int i = 0; i < numCells; ++i)
-  {
-    assert(CELL_MUTEX_ID < MUTEXES_PER_CELL);
-    int n = (border[i] ? MUTEXES_PER_CELL : CELL_MUTEX_ID+1);
-    mutex[i] = new pthread_mutex_t[n];
-    for(int j = 0; j < n; ++j)
-      pthread_mutex_init(&mutex[i][j], NULL);
-  }
-  pthread_barrier_init(&barrier, NULL, NUM_GRIDS);
-#ifdef ENABLE_VISUALIZATION
-  //visualization barrier is used by all NUM_GRIDS worker threads and 1 master thread
-  pthread_barrier_init(&visualization_barrier, NULL, NUM_GRIDS+1);
-#endif
   //make sure Cell structure is multiple of estiamted cache line size
   assert(sizeof(Cell) % CACHELINE_SIZE == 0);
   //make sure helper Cell structure is in sync with real Cell structure
   assert(offsetof(struct Cell_aux, padding) == offsetof(struct Cell, padding));
 
-#if defined(WIN32)
-  cells = (struct Cell*)_aligned_malloc(sizeof(struct Cell) * numCells, CACHELINE_SIZE);
-  cells2 = (struct Cell*)_aligned_malloc(sizeof(struct Cell) * numCells, CACHELINE_SIZE);
-  cnumPars = (int*)_aligned_malloc(sizeof(int) * numCells, CACHELINE_SIZE);
-  cnumPars2 = (int*)_aligned_malloc(sizeof(int) * numCells, CACHELINE_SIZE);
-  last_cells = (struct Cell **)_aligned_malloc(sizeof(struct Cell *) * numCells, CACHELINE_SIZE);
-  assert((cells!=NULL) && (cells2!=NULL) && (cnumPars!=NULL) && (cnumPars2!=NULL) && (last_cells!=NULL)); 
-#elif defined(SPARC_SOLARIS)
-  cells = (Cell*)memalign(CACHELINE_SIZE, sizeof(struct Cell) * numCells);
-  cells2 =  (Cell*)memalign(CACHELINE_SIZE, sizeof(struct Cell) * numCells);
-  cnumPars =  (int*)memalign(CACHELINE_SIZE, sizeof(int) * numCells);
-  cnumPars2 =  (int*)memalign(CACHELINE_SIZE, sizeof(int) * numCells);
-  last_cells =  (Cell**)memalign(CACHELINE_SIZE, sizeof(struct Cell *) * numCells);
-  assert((cells!=0) && (cells2!=0) && (cnumPars!=0) && (cnumPars2!=0) && (last_cells!=0));
-#else
   int rv0 = posix_memalign((void **)(&cells), CACHELINE_SIZE, sizeof(struct Cell) * numCells);
   int rv1 = posix_memalign((void **)(&cells2), CACHELINE_SIZE, sizeof(struct Cell) * numCells);
   int rv2 = posix_memalign((void **)(&cnumPars), CACHELINE_SIZE, sizeof(int) * numCells);
   int rv3 = posix_memalign((void **)(&cnumPars2), CACHELINE_SIZE, sizeof(int) * numCells);
   int rv4 = posix_memalign((void **)(&last_cells), CACHELINE_SIZE, sizeof(struct Cell *) * numCells);
   assert((rv0==0) && (rv1==0) && (rv2==0) && (rv3==0) && (rv4==0));
-#endif
 
   // because cells and cells2 are not allocated via new
   // we construct them here
@@ -475,38 +424,14 @@ void CleanUpSim()
   //      itself. This guarantees that all allocated cells will be freed but it might
   //      render other cell pools unusable so they also have to be destroyed.
   for(int i=0; i<NUM_GRIDS; i++) cellpool_destroy(&pools[i]);
-  pthread_attr_destroy(&attr);
-
-  for(int i = 0; i < numCells; ++i)
-  {
-    assert(CELL_MUTEX_ID < MUTEXES_PER_CELL);
-    int n = (border[i] ? MUTEXES_PER_CELL : CELL_MUTEX_ID+1);
-    for(int j = 0; j < n; ++j)
-      pthread_mutex_destroy(&mutex[i][j]);
-    delete[] mutex[i];
-  }
-  delete[] mutex;
-  pthread_barrier_destroy(&barrier);
-#ifdef ENABLE_VISUALIZATION
-  pthread_barrier_destroy(&visualization_barrier);
-#endif
 
   delete[] border;
 
-#if defined(WIN32)
-  _aligned_free(cells);
-  _aligned_free(cells2);
-  _aligned_free(cnumPars);
-  _aligned_free(cnumPars2);
-  _aligned_free(last_cells);
-#else
   free(cells);
   free(cells2);
   free(cnumPars);
   free(cnumPars2);
   free(last_cells);
-#endif
-  delete[] thread;
   delete[] grids;
 }
 
@@ -539,6 +464,55 @@ raft::kstatus SimpleAccumulatorKernel::run()
 
 ////////////////////////////////////////////////////////////////////////////////
 
+SimpleProducerKernel::SimpleProducerKernel(int threadCount)
+  : raft::kernel(), m_ThreadCount(threadCount)
+{
+  // Add our IO ports
+  for (auto i = 0; i < m_ThreadCount; i++)
+  {
+    const char* val = std::to_string(i).c_str();
+    output.addPort<int>(val);
+  }
+}
+
+raft::kstatus SimpleProducerKernel::run()
+{
+  // Pass through the TIDs
+  for (auto i = 0; i < m_ThreadCount; i++)
+  {
+    const char* val = std::to_string(i).c_str();
+    output[val].push<int>(i);
+  }
+
+  return raft::stop;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+SimpleConsumerKernel::SimpleConsumerKernel(int threadCount)
+  : raft::kernel_all(), m_ThreadCount(threadCount)
+{
+  // Add our IO ports
+  for (auto i = 0; i < m_ThreadCount; i++)
+  {
+    const char* val = std::to_string(i).c_str();
+    input.addPort<int>(val);
+  }
+}
+
+raft::kstatus SimpleConsumerKernel::run()
+{
+  for (auto i = 0; i < m_ThreadCount; i++)
+  {
+    const char* val = std::to_string(i).c_str();
+    input[val].recycle();
+  }
+
+  return raft::proceed;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 AdvancedAccumulatorKernel::AdvancedAccumulatorKernel(int threadCount)
   : raft::kernel_all(), m_ThreadCount(threadCount)
 {
@@ -551,13 +525,13 @@ AdvancedAccumulatorKernel::AdvancedAccumulatorKernel(int threadCount)
   }
 
   // Input from our modification kernel
-  input.addPort<bool>("input_mod");
+  input.addPort<int>("input_mod");
 }
 
 raft::kstatus AdvancedAccumulatorKernel::run()
 {
   // If the modification kernel returned false, something definitely went wrong
-  if (!input["input_mod"].peek<bool>())
+  if (!input["input_mod"].peek<int>())
   {
     std::cerr << "ERROR: AdvancedAccumulatorKernel got false output from modification kernel!" << std::endl;
     exit(EXIT_FAILURE);
@@ -586,7 +560,7 @@ void ClearParticlesMT(int tid)
       {
         int index = (iz*ny + iy)*nx + ix;
         cnumPars[index] = 0;
-		cells[index].next = NULL;
+		    cells[index].next = NULL;
         last_cells[index] = &cells[index];
       }
 }
@@ -617,109 +591,6 @@ raft::kstatus ClearParticlesMTWorker::run()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-
-void RebuildGridMT(int tid)
-{
-  // Note, in parallel versions the below swaps
-  // occure outside RebuildGrid()
-  // swap src and dest arrays with particles
-  //   std::swap(cells, cells2);
-  // swap src and dest arrays with counts of particles
-  //  std::swap(cnumPars, cnumPars2);
-
-  //iterate through source cell lists
-  for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
-    for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
-      for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
-      {
-        int index2 = (iz*ny + iy)*nx + ix;
-        Cell *cell2 = &cells2[index2];
-        int np2 = cnumPars2[index2];
-        //iterate through source particles
-        for(int j = 0; j < np2; ++j)
-        {
-          //get destination for source particle
-          int ci = (int)((cell2->p[j % PARTICLES_PER_CELL].x - domainMin.x) / delta.x);
-          int cj = (int)((cell2->p[j % PARTICLES_PER_CELL].y - domainMin.y) / delta.y);
-          int ck = (int)((cell2->p[j % PARTICLES_PER_CELL].z - domainMin.z) / delta.z);
-
-          if(ci < 0) ci = 0; else if(ci > (nx-1)) ci = nx-1;
-          if(cj < 0) cj = 0; else if(cj > (ny-1)) cj = ny-1;
-          if(ck < 0) ck = 0; else if(ck > (nz-1)) ck = nz-1;
-#if 0
-		  assert(ci>=ix-1);
-		  assert(ci<=ix+1);
-		  assert(cj>=iy-1);
-		  assert(cj<=iy+1);
-		  assert(ck>=iz-1);
-		  assert(ck<=iz+1);
-#endif
-#ifdef ENABLE_CFL_CHECK
-          //check that source cell is a neighbor of destination cell
-          bool cfl_cond_satisfied=false;
-          for(int di = -1; di <= 1; ++di)
-            for(int dj = -1; dj <= 1; ++dj)
-              for(int dk = -1; dk <= 1; ++dk)
-              {
-                int ii = ci + di;
-                int jj = cj + dj;
-                int kk = ck + dk;
-                if(ii >= 0 && ii < nx && jj >= 0 && jj < ny && kk >= 0 && kk < nz)
-                {
-                  int index = (kk*ny + jj)*nx + ii;
-                  if(index == index2)
-                  {
-                    cfl_cond_satisfied=true;
-                    break;
-                  }
-                }
-              }
-          if(!cfl_cond_satisfied)
-          {
-            std::cerr << "FATAL ERROR: Courant–Friedrichs–Lewy condition not satisfied." << std::endl;
-            exit(1);
-          }
-#endif //ENABLE_CFL_CHECK
-
-          int index = (ck*ny + cj)*nx + ci;
-          // this assumes that particles cannot travel more than one grid cell per time step
-          if(border[index])
-            pthread_mutex_lock(&mutex[index][CELL_MUTEX_ID]);
-          Cell *cell = last_cells[index];
-          int np = cnumPars[index];
-
-          //add another cell structure if everything full
-          if( (np % PARTICLES_PER_CELL == 0) && (cnumPars[index] != 0) ) {
-            cell->next = cellpool_getcell(&pools[tid]);
-            cell = cell->next;
-            last_cells[index] = cell;
-          }
-          ++cnumPars[index];
-          if(border[index])
-            pthread_mutex_unlock(&mutex[index][CELL_MUTEX_ID]);
-
-          //copy source to destination particle
-          
-          cell->p[np % PARTICLES_PER_CELL]  = cell2->p[j % PARTICLES_PER_CELL];
-          cell->hv[np % PARTICLES_PER_CELL] = cell2->hv[j % PARTICLES_PER_CELL];
-          cell->v[np % PARTICLES_PER_CELL]  = cell2->v[j % PARTICLES_PER_CELL];
-          //move pointer to next source cell in list if end of array is reached
-          if(j % PARTICLES_PER_CELL == PARTICLES_PER_CELL-1) {
-            Cell *temp = cell2;
-            cell2 = cell2->next;
-            //return cells to pool that are not statically allocated head of lists
-            if(temp != &cells2[index2]) {
-              //NOTE: This is thread-safe because temp and pool are thread-private, no need to synchronize
-              cellpool_returncell(&pools[tid], temp);
-            }
-          }
-        } // for(int j = 0; j < np2; ++j)
-        //return cells to pool that are not statically allocated head of lists
-        if((cell2 != NULL) && (cell2 != &cells2[index2])) {
-          cellpool_returncell(&pools[tid], cell2);
-    }
-      }
-}
 
 RebuildGridMTWorker::RebuildGridMTWorker()
 {
@@ -785,8 +656,6 @@ raft::kstatus RebuildGridMTWorker::run()
 
           int index = (ck*ny + cj)*nx + ci;
           // this assumes that particles cannot travel more than one grid cell per time step
-          //if(border[index])
-          //  pthread_mutex_lock(&mutex[index][CELL_MUTEX_ID]);
 
           // Make call to modify cell in other kernel instead of here to avoid lock
           output["output_cell"].push<CellModificationInfo>(CellModificationInfo(cell2, index, j, SynchronizeKernelData(tid, false)));
@@ -820,7 +689,7 @@ CellModificationKernel::CellModificationKernel(int threadCount)
   : raft::kernel(), m_ThreadCount(threadCount)
 {
   // The output port which will notify the next kernel that this is finished.
-  output.addPort<bool>("output");
+  output.addPort<int>("output");
 
   // Add input ports
   for (auto i = 0; i < m_ThreadCount; i++)
@@ -832,15 +701,23 @@ CellModificationKernel::CellModificationKernel(int threadCount)
     m_Done[i] = 0;
 }
 
+CellModificationKernel::~CellModificationKernel()
+{
+  delete[] m_Done;
+}
+
 raft::kstatus CellModificationKernel::run()
 {
   // Check each port for new data
-  for (auto &port : input)
+  //for (auto &port : input)
+  //{
+  for (auto i = 0; i < m_ThreadCount; i++)
   {
+    const char* val = std::to_string(i).c_str();
     // Loop will only run if port has size > 0
-    for (size_t i = 0; i < port.size(); i++)
+    for (size_t i = 0; i < input[val].size(); i++)
     {
-      CellModificationInfo inputData = port.peek<CellModificationInfo>();
+      CellModificationInfo inputData = input[val].peek<CellModificationInfo>();
       
       // If the kernel has already sent that it is finished
       if (m_Done[inputData.kernelData.tid])
@@ -853,7 +730,7 @@ raft::kstatus CellModificationKernel::run()
       if (inputData.kernelData.done)
       {
         m_Done[inputData.kernelData.tid] = true;
-        port.recycle(1);
+        input[val].recycle(1);
         continue;
       }
       
@@ -875,7 +752,7 @@ raft::kstatus CellModificationKernel::run()
       cell->hv[np % PARTICLES_PER_CELL] = inputData.cell2->hv[inputData.j % PARTICLES_PER_CELL];
       cell->v[np % PARTICLES_PER_CELL]  = inputData.cell2->v[inputData.j % PARTICLES_PER_CELL];
 
-      port.recycle(1);
+      input[val].recycle(1);
     }
   }
 
@@ -886,7 +763,7 @@ raft::kstatus CellModificationKernel::run()
       done = false;
 
   if (done)
-    output["output"].push<bool>(true);
+    output["output"].push<int>(true);
 
   return raft::proceed;
 }
@@ -972,73 +849,6 @@ raft::kstatus InitDensitiesAndForcesMTWorker::run()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void ComputeDensitiesMT(int tid)
-{
-  int neighCells[3*3*3];
-
-  for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
-    for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
-      for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
-      {
-        int index = (iz*ny + iy)*nx + ix;
-        int np = cnumPars[index];
-        if(np == 0)
-          continue;
-
-        int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells);
-
-        Cell *cell = &cells[index];
-        for(int ipar = 0; ipar < np; ++ipar)
-        {
-          for(int inc = 0; inc < numNeighCells; ++inc)
-          {
-            int indexNeigh = neighCells[inc];
-            Cell *neigh = &cells[indexNeigh];
-            int numNeighPars = cnumPars[indexNeigh];
-            for(int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh)
-            {
-              //Check address to make sure densities are computed only once per pair
-              if(&neigh->p[iparNeigh % PARTICLES_PER_CELL] < &cell->p[ipar % PARTICLES_PER_CELL])
-              {
-                fptype distSq = (cell->p[ipar % PARTICLES_PER_CELL] - neigh->p[iparNeigh % PARTICLES_PER_CELL]).GetLengthSq();
-                if(distSq < hSq)
-                {
-                  fptype t = hSq - distSq;
-                  fptype tc = t*t*t;
-
-                  if(border[index])
-                  {
-                    pthread_mutex_lock(&mutex[index][ipar % MUTEXES_PER_CELL]);
-                    cell->density[ipar % PARTICLES_PER_CELL] += tc;
-                    pthread_mutex_unlock(&mutex[index][ipar % MUTEXES_PER_CELL]);
-                  }
-                  else
-                    cell->density[ipar % PARTICLES_PER_CELL] += tc;
-
-                  if(border[indexNeigh])
-                  {
-                    pthread_mutex_lock(&mutex[indexNeigh][iparNeigh % MUTEXES_PER_CELL]);
-                    neigh->density[iparNeigh % PARTICLES_PER_CELL] += tc;
-                    pthread_mutex_unlock(&mutex[indexNeigh][iparNeigh % MUTEXES_PER_CELL]);
-                  }
-                  else
-                    neigh->density[iparNeigh % PARTICLES_PER_CELL] += tc;
-                }
-              }
-              //move pointer to next cell in list if end of array is reached
-              if(iparNeigh % PARTICLES_PER_CELL == PARTICLES_PER_CELL-1) {
-                neigh = neigh->next;
-              }
-            }
-          }
-          //move pointer to next cell in list if end of array is reached
-          if(ipar % PARTICLES_PER_CELL == PARTICLES_PER_CELL-1) {
-            cell = cell->next;
-          }
-        }
-      }
-}
-
 ComputeDensitiesMTWorker::ComputeDensitiesMTWorker()
 {
   // Create our input port (tid)
@@ -1120,7 +930,7 @@ DensityModificationKernel::DensityModificationKernel(int threadCount)
   : raft::kernel(), m_ThreadCount(threadCount)
 {
   // The output port which will notify the next kernel that this is finished.
-  output.addPort<bool>("output");
+  output.addPort<int>("output");
 
   // Add input ports
   for (auto i = 0; i < m_ThreadCount; i++)
@@ -1132,15 +942,23 @@ DensityModificationKernel::DensityModificationKernel(int threadCount)
     m_Done[i] = 0;
 }
 
+DensityModificationKernel::~DensityModificationKernel()
+{
+  delete[] m_Done;
+}
+
 raft::kstatus DensityModificationKernel::run()
 {
   // Check each port for new data
-  for (auto &port : input)
+  //for (auto &port : input)
+  //{
+  for (auto i = 0; i < m_ThreadCount; i++)
   {
+    const char* val = std::to_string(i).c_str();
     // Loop will only run if port has size > 0
-    for (size_t i = 0; i < port.size(); i++)
+    for (size_t i = 0; i < input[val].size(); i++)
     {
-      DensityModificationInfo inputData = port.peek<DensityModificationInfo>();
+      DensityModificationInfo inputData = input[val].peek<DensityModificationInfo>();
       
       // If the kernel has already sent that it is finished
       if (m_Done[inputData.kernelData.tid])
@@ -1153,13 +971,13 @@ raft::kstatus DensityModificationKernel::run()
       if (inputData.kernelData.done)
       {
         m_Done[inputData.kernelData.tid] = true;
-        port.recycle(1);
+        input[val].recycle(1);
         continue;
       }
       
       // Perform the density set operation
       inputData.cell->density[inputData.index] += inputData.tc;
-      port.recycle(1);
+      input[val].recycle(1);
     }
   }
 
@@ -1170,7 +988,7 @@ raft::kstatus DensityModificationKernel::run()
       done = false;
 
   if (done)
-    output["output"].push<bool>(true);
+    output["output"].push<int>(true);
 
   return raft::proceed;
 }
@@ -1224,83 +1042,8 @@ raft::kstatus ComputeDensities2MTWorker::run()
   return raft::proceed;
 }
 
+
 ////////////////////////////////////////////////////////////////////////////////
-
-void ComputeForcesMT(int tid)
-{
-  int neighCells[3*3*3];
-
-  for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
-    for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
-      for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
-      {
-        int index = (iz*ny + iy)*nx + ix;
-        int np = cnumPars[index];
-        if(np == 0)
-          continue;
-
-        int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells);
-
-        Cell *cell = &cells[index];
-        for(int ipar = 0; ipar < np; ++ipar)
-        {
-          for(int inc = 0; inc < numNeighCells; ++inc)
-          {
-            int indexNeigh = neighCells[inc];
-            Cell *neigh = &cells[indexNeigh];
-            int numNeighPars = cnumPars[indexNeigh];
-            for(int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh)
-            {
-              //Check address to make sure forces are computed only once per pair
-              if(&neigh->p[iparNeigh % PARTICLES_PER_CELL] < &cell->p[ipar % PARTICLES_PER_CELL])
-              {
-                Vec3 disp = cell->p[ipar % PARTICLES_PER_CELL] - neigh->p[iparNeigh % PARTICLES_PER_CELL];
-                fptype distSq = disp.GetLengthSq();
-                if(distSq < hSq)
-                {
-#ifndef ENABLE_DOUBLE_PRECISION
-                  fptype dist = sqrtf(std::max(distSq, (fptype)1e-12));
-#else
-                  fptype dist = sqrt(std::max(distSq, 1e-12));
-#endif //ENABLE_DOUBLE_PRECISION
-                  fptype hmr = h - dist;
-
-                  Vec3 acc = disp * pressureCoeff * (hmr*hmr/dist) * (cell->density[ipar % PARTICLES_PER_CELL]+neigh->density[iparNeigh % PARTICLES_PER_CELL] - doubleRestDensity);
-                  acc += (neigh->v[iparNeigh % PARTICLES_PER_CELL] - cell->v[ipar % PARTICLES_PER_CELL]) * viscosityCoeff * hmr;
-                  acc /= cell->density[ipar % PARTICLES_PER_CELL] * neigh->density[iparNeigh % PARTICLES_PER_CELL];
-
-                  if( border[index])
-                  {
-                    pthread_mutex_lock(&mutex[index][ipar % MUTEXES_PER_CELL]);
-                    cell->a[ipar % PARTICLES_PER_CELL] += acc;
-                    pthread_mutex_unlock(&mutex[index][ipar % MUTEXES_PER_CELL]);
-                  }
-                  else
-                    cell->a[ipar % PARTICLES_PER_CELL] += acc;
-
-                  if( border[indexNeigh])
-                  {
-                    pthread_mutex_lock(&mutex[indexNeigh][iparNeigh % MUTEXES_PER_CELL]);
-                    neigh->a[iparNeigh % PARTICLES_PER_CELL] -= acc;
-                    pthread_mutex_unlock(&mutex[indexNeigh][iparNeigh % MUTEXES_PER_CELL]);
-                  }
-                  else
-                    neigh->a[iparNeigh % PARTICLES_PER_CELL] -= acc;
-                }
-              }
-              //move pointer to next cell in list if end of array is reached
-              if(iparNeigh % PARTICLES_PER_CELL == PARTICLES_PER_CELL-1) {
-                neigh = neigh->next;
-              }
-            }
-          }
-          //move pointer to next cell in list if end of array is reached
-          if(ipar % PARTICLES_PER_CELL == PARTICLES_PER_CELL-1) {
-            cell = cell->next;
-          }
-        }
-      }
-}
 
 ComputeForcesMTWorker::ComputeForcesMTWorker()
 {
@@ -1329,7 +1072,8 @@ raft::kstatus ComputeForcesMTWorker::run()
         if(np == 0)
           continue;
 
-        int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells);
+        //int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells);
+        int numNeighCells = 0;
 
         Cell *cell = &cells[index];
         for(int ipar = 0; ipar < np; ++ipar)
@@ -1377,7 +1121,7 @@ raft::kstatus ComputeForcesMTWorker::run()
       }
 
   // Tell the acceleration mod kernel that we're done with our work
-  output["output_density"].push<AccelerationModificationInfo>(AccelerationModificationInfo(nullptr, -1, Vec3(), SynchronizeKernelData(tid, true)));
+  output["output_acceleration"].push<AccelerationModificationInfo>(AccelerationModificationInfo(nullptr, -1, Vec3(), SynchronizeKernelData(tid, true)));
   
   // Push our output and cleanup
   output["output_tid"].push<int>(tid);
@@ -1389,12 +1133,12 @@ raft::kstatus ComputeForcesMTWorker::run()
 AccelerationModificationKernel::AccelerationModificationKernel(int threadCount)
   : raft::kernel(), m_ThreadCount(threadCount)
 {
-  // The output port which will notify the next kernel that this is finished.
-  output.addPort<bool>("output");
-
   // Add input ports
   for (auto i = 0; i < m_ThreadCount; i++)
     input.addPort<AccelerationModificationInfo>(std::to_string(i).c_str());
+
+  // The output port which will notify the next kernel that this is finished.
+  output.addPort<int>("output");
 
   m_Done = new bool[m_ThreadCount];
 
@@ -1402,15 +1146,23 @@ AccelerationModificationKernel::AccelerationModificationKernel(int threadCount)
     m_Done[i] = 0;
 }
 
+AccelerationModificationKernel::~AccelerationModificationKernel()
+{
+  delete[] m_Done;
+}
+
 raft::kstatus AccelerationModificationKernel::run()
 {
   // Check each port for new data
-  for (auto &port : input)
+  //for (auto &port : input)
+  //{
+  for (auto i = 0; i < m_ThreadCount; i++)
   {
+    const char* val = std::to_string(i).c_str();
     // Loop will only run if port has size > 0
-    for (size_t i = 0; i < port.size(); i++)
+    for (size_t i = 0; i < input[val].size(); i++)
     {
-      AccelerationModificationInfo inputData = port.peek<AccelerationModificationInfo>();
+      AccelerationModificationInfo inputData = input[val].peek<AccelerationModificationInfo>();
       
       // If the kernel has already sent that it is finished
       if (m_Done[inputData.kernelData.tid])
@@ -1423,13 +1175,13 @@ raft::kstatus AccelerationModificationKernel::run()
       if (inputData.kernelData.done)
       {
         m_Done[inputData.kernelData.tid] = true;
-        port.recycle(1);
+        input[val].recycle(1);
         continue;
       }
       
       // Perform the acceleration set operation
       inputData.cell->a[inputData.index] += inputData.acc;
-      port.recycle(1);
+      input[val].recycle(1);
     }
   }
 
@@ -1440,10 +1192,11 @@ raft::kstatus AccelerationModificationKernel::run()
       done = false;
 
   if (done)
-    output["output"].push<bool>(true);
+    output["output"].push<int>(true);
 
   return raft::proceed;
 }
+
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -1773,52 +1526,81 @@ raft::kstatus AdvanceParticlesMTWorker::run()
   return raft::proceed;
 }
 
+
 ////////////////////////////////////////////////////////////////////////////////
 
-void AdvanceFrameMT(int tid)
+void AdvanceFrameMT(int threadnum)
 {
-  //swap src and dest arrays with particles
-  if(tid==0) {
-    std::swap(cells, cells2);
-    std::swap(cnumPars, cnumPars2);
-  }
-  pthread_barrier_wait(&barrier);
+  std::swap(cells, cells2);
+  std::swap(cnumPars, cnumPars2);
 
-  ClearParticlesMT(tid);
-  pthread_barrier_wait(&barrier);
-  RebuildGridMT(tid);
-  pthread_barrier_wait(&barrier);
-  InitDensitiesAndForcesMT(tid);
-  pthread_barrier_wait(&barrier);
-  ComputeDensitiesMT(tid);
-  pthread_barrier_wait(&barrier);
-  ComputeDensities2MT(tid);
-  pthread_barrier_wait(&barrier);
-  ComputeForcesMT(tid);
-  pthread_barrier_wait(&barrier);
-  ProcessCollisionsMT(tid);
-  pthread_barrier_wait(&barrier);
-  AdvanceParticlesMT(tid);
-  pthread_barrier_wait(&barrier);
-#if defined(USE_ImpeneratableWall)
-  // N.B. The integration of the position can place the particle
-  // outside the domain. We now make a pass on the perimiter cells
-  // to account for particle migration beyond domain.
-  ProcessCollisions2MT(tid);
-  pthread_barrier_wait(&barrier);
-#endif
+  // Kernel Initialization
+  SimpleProducerKernel simpleProducer(threadnum);
+  ClearParticlesMTWorker clearParticlesMTWorkers[threadnum];
+  SimpleAccumulatorKernel simpleAccum1(threadnum);
+  RebuildGridMTWorker rebuildGridMTWorkers[threadnum];
+  CellModificationKernel cellModificationKernel(threadnum);
+  AdvancedAccumulatorKernel advancedAccum1(threadnum);
+  InitDensitiesAndForcesMTWorker initDensitiesAndForcesMTWorkers[threadnum];
+  SimpleAccumulatorKernel simpleAccum2(threadnum);
+  ComputeDensitiesMTWorker computeDensitiesMTWorkers[threadnum];
+  DensityModificationKernel densityModificationKernel(threadnum);
+  AdvancedAccumulatorKernel advancedAccum2(threadnum);
+  ComputeDensities2MTWorker computeDensities2MTWorkers[threadnum];
+  SimpleAccumulatorKernel simpleAccum3(threadnum);
+  ComputeForcesMTWorker computeForcesMTWorkers[threadnum];
+  AccelerationModificationKernel accelerationModificationKernel(threadnum);
+  AdvancedAccumulatorKernel advancedAccum3(threadnum);
+  ProcessCollisionsMTWorker processCollisionsMTWorkers[threadnum];
+  SimpleAccumulatorKernel simpleAccum4(threadnum);
+  AdvanceParticlesMTWorker advanceParticlesMTWorkers[threadnum];
+  SimpleAccumulatorKernel simpleAccum5(threadnum);
+  ProcessCollisions2MTWorker processCollisions2MTWorkers[threadnum];
+  SimpleConsumerKernel simpleConsumer(threadnum);
+
+  raft::map m;
+
+  m += cellModificationKernel >> advancedAccum1["input_mod"];
+  m += densityModificationKernel >> advancedAccum2["input_mod"];
+  m += accelerationModificationKernel >> advancedAccum3["input_mod"];
+
+  // Map construction
+  for (auto i = 0; i < threadnum; i++)
+  {
+    const char* val = std::to_string(i).c_str();
+    m += simpleProducer[val] >> clearParticlesMTWorkers[i];
+    m += clearParticlesMTWorkers[i] >> simpleAccum1[val];
+    m += simpleAccum1[val] >> rebuildGridMTWorkers[i];
+    m += rebuildGridMTWorkers[i]["output_tid"] >> advancedAccum1[val];
+    m += rebuildGridMTWorkers[i]["output_cell"] >> cellModificationKernel[val];
+    m += advancedAccum1[val] >> initDensitiesAndForcesMTWorkers[i];
+    m += initDensitiesAndForcesMTWorkers[i] >> simpleAccum2[val];
+    m += simpleAccum2[val] >> computeDensitiesMTWorkers[i];
+    m += computeDensitiesMTWorkers[i]["output_tid"] >> advancedAccum2[val];
+    m += computeDensitiesMTWorkers[i]["output_density"] >> densityModificationKernel[val];
+    m += advancedAccum2[val] >> computeDensities2MTWorkers[i];
+    m += computeDensities2MTWorkers[i] >> simpleAccum3[val];
+    m += simpleAccum3[val] >> computeForcesMTWorkers[i];
+    m += computeForcesMTWorkers[i]["output_tid"] >> advancedAccum3[val];
+    m += computeForcesMTWorkers[i]["output_acceleration"] >> accelerationModificationKernel[val];
+    m += advancedAccum3[val] >> processCollisionsMTWorkers[i];
+    m += processCollisionsMTWorkers[i] >> simpleAccum4[val];
+    m += simpleAccum4[val] >> advanceParticlesMTWorkers[i];
+    m += advanceParticlesMTWorkers[i] >> simpleAccum5[val];
+    m += simpleAccum5[val] >> processCollisions2MTWorkers[i];
+    m += processCollisions2MTWorkers[i] >> simpleConsumer[val];
+  }
+
+  // Execute the kernel
+  m.exe();
+  
 }
 
 #ifndef ENABLE_VISUALIZATION
-void *AdvanceFramesMT(void *args)
+void AdvanceFramesMT(int framenum, int threadnum)
 {
-  thread_args *targs = (thread_args *)args;
-
-  for(int i = 0; i < targs->frames; ++i) {
-    AdvanceFrameMT(targs->tid);
-  }
-  
-  return NULL;
+  for (auto i = 0; i < framenum; i++)
+    AdvanceFrameMT(threadnum);
 }
 #else
 //Frame advancement function for worker threads
@@ -1857,17 +1639,6 @@ void AdvanceFrameVisualization()
 
 int main(int argc, char *argv[])
 {
-#ifdef PARSEC_VERSION
-#define __PARSEC_STRING(x) #x
-#define __PARSEC_XSTRING(x) __PARSEC_STRING(x)
-        std::cout << "PARSEC Benchmark Suite Version "__PARSEC_XSTRING(PARSEC_VERSION) << std::endl << std::flush;
-#else
-        std::cout << "PARSEC Benchmark Suite" << std::endl << std::flush;
-#endif //PARSEC_VERSION
-#ifdef ENABLE_PARSEC_HOOKS
-  __parsec_bench_begin(__parsec_fluidanimate);
-#endif
-
   if(argc < 4 || argc >= 6)
   {
     std::cout << "Usage: " << argv[0] << " <threadnum> <framenum> <.fluid input file> [.fluid output file]" << std::endl;
@@ -1896,41 +1667,18 @@ int main(int argc, char *argv[])
   InitVisualizationMode(&argc, argv, &AdvanceFrameVisualization, &numCells, &cells, &cnumPars);
 #endif
 
-#ifdef ENABLE_PARSEC_HOOKS
-  __parsec_roi_begin();
-#endif
-#if defined(WIN32)
-  thread_args* targs = (thread_args*)alloca(sizeof(thread_args)*threadnum);
+// *** PARALLEL PHASE *** //
+#ifndef ENABLE_VISUALIZATION
+  AdvanceFramesMT(framenum, threadnum);
 #else
-  thread_args targs[threadnum];
-#endif
-  for(int i = 0; i < threadnum; ++i) {
-    targs[i].tid = i;
-    targs[i].frames = framenum;
-    pthread_create(&thread[i], &attr, AdvanceFramesMT, &targs[i]);
-  }
-
-  // *** PARALLEL PHASE *** //
-#ifdef ENABLE_VISUALIZATION
   Visualize();
-#endif
-
-  for(int i = 0; i < threadnum; ++i) {
-    pthread_join(thread[i], NULL);
-  }
-#ifdef ENABLE_PARSEC_HOOKS
-  __parsec_roi_end();
 #endif
 
   if(argc > 4)
     SaveFile(argv[4]);
   CleanUpSim();
 
-#ifdef ENABLE_PARSEC_HOOKS
-  __parsec_bench_end();
-#endif
-
-  return 0;
+  return EXIT_SUCCESS;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -1,5 +1,5 @@
-#ifndef RAFTLIB_H
-#define RAFTLIB_H
+#ifndef RAFTLIBSRC_H
+#define RAFTLIBSRC_H
 
 #include "fluid.hpp"
 #include <raft>
@@ -49,6 +49,24 @@ public:
   virtual raft::kstatus run();
 };
 
+class SimpleProducerKernel : public raft::kernel
+{
+private:
+  int m_ThreadCount;
+public:
+  SimpleProducerKernel(int threadCount);
+  virtual raft::kstatus run();
+};
+
+class SimpleConsumerKernel : public raft::kernel_all
+{
+private:
+  int m_ThreadCount;
+public:
+  SimpleConsumerKernel(int threadCount);
+  virtual raft::kstatus run();
+};
+
 class AdvancedAccumulatorKernel : public raft::kernel_all
 {
 private:
@@ -90,6 +108,7 @@ private:
   bool* m_Done;
 public:
   CellModificationKernel(int threadCount);
+  ~CellModificationKernel();
   virtual raft::kstatus run();
 };
 
@@ -125,6 +144,7 @@ private:
   bool* m_Done;
 public:
   DensityModificationKernel(int threadCount);
+  ~DensityModificationKernel();
   virtual raft::kstatus run();
 };
 
@@ -160,6 +180,7 @@ private:
   bool* m_Done;
 public:
   AccelerationModificationKernel(int threadCount);
+  ~AccelerationModificationKernel();
   virtual raft::kstatus run();
 };
 
