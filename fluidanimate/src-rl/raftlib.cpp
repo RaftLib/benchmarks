@@ -803,6 +803,142 @@ void ComputeDensitiesMT(int tid)
       }
 }
 
+ComputeDensitiesMTWorker::ComputeDensitiesMTWorker()
+{
+  // Create our input port (tid)
+  input.addPort<int>("input");
+
+  // Create the output port (tid)
+  output.addPort<int>("output_tid");
+
+  // Create an output port for modifying density values in a thread-safe way
+  output.addPort<DensityModificationInfo>("output_density");
+}
+
+raft::kstatus ComputeDensitiesMTWorker::run()
+{
+  int tid = input["input"].peek<int>();
+
+  int neighCells[3*3*3];
+
+  for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
+    for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
+      for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
+      {
+        int index = (iz*ny + iy)*nx + ix;
+        int np = cnumPars[index];
+        if(np == 0)
+          continue;
+
+        int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells);
+
+        Cell *cell = &cells[index];
+        for(int ipar = 0; ipar < np; ++ipar)
+        {
+          for(int inc = 0; inc < numNeighCells; ++inc)
+          {
+            int indexNeigh = neighCells[inc];
+            Cell *neigh = &cells[indexNeigh];
+            int numNeighPars = cnumPars[indexNeigh];
+            for(int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh)
+            {
+              //Check address to make sure densities are computed only once per pair
+              if(&neigh->p[iparNeigh % PARTICLES_PER_CELL] < &cell->p[ipar % PARTICLES_PER_CELL])
+              {
+                fptype distSq = (cell->p[ipar % PARTICLES_PER_CELL] - neigh->p[iparNeigh % PARTICLES_PER_CELL]).GetLengthSq();
+                if(distSq < hSq)
+                {
+                  fptype t = hSq - distSq;
+                  fptype tc = t*t*t;
+
+                  // Instead of using locks, we will use another kernel to handle all density modifications
+                  output["output_density"].push<DensityModificationInfo>(DensityModificationInfo(cell, ipar % PARTICLES_PER_CELL, tc, SynchronizeKernelData(tid, false)));
+                  output["output_density"].push<DensityModificationInfo>(DensityModificationInfo(neigh, iparNeigh % PARTICLES_PER_CELL, tc, SynchronizeKernelData(tid, false)));
+
+                }
+              }
+              //move pointer to next cell in list if end of array is reached
+              if(iparNeigh % PARTICLES_PER_CELL == PARTICLES_PER_CELL-1) {
+                neigh = neigh->next;
+              }
+            }
+          }
+          //move pointer to next cell in list if end of array is reached
+          if(ipar % PARTICLES_PER_CELL == PARTICLES_PER_CELL-1) {
+            cell = cell->next;
+          }
+        }
+      }
+
+  // Tell the density mod kernel that we're done with our work
+  output["output_density"].push<DensityModificationInfo>(DensityModificationInfo(nullptr, -1, 0, SynchronizeKernelData(tid, true)));
+  
+  // Push our output and cleanup
+  output["output_tid"].push<int>(tid);
+  input["input"].recycle();
+
+  return raft::proceed;
+}
+
+DensityModificationKernel::DensityModificationKernel(int threadCount)
+  : raft::parallel_k(), m_ThreadCount(threadCount)
+{
+  // The output port which will notify the next kernel that this is finished.
+  output.addPort<bool>("output");
+
+  // Add input ports
+  for (auto i = 0; i < m_ThreadCount; i++)
+    addPortTo<DensityModificationInfo>(input);
+
+  m_Done = new bool[m_ThreadCount];
+
+  for (auto i = 0; i < m_ThreadCount; i++)
+    m_Done[i] = 0;
+}
+
+raft::kstatus DensityModificationKernel::run()
+{
+  // Check each port for new data
+  for (auto &port : input)
+  {
+    // Loop will only run if port has size > 0
+    for (size_t i = 0; i < port.size(); i++)
+    {
+      DensityModificationInfo inputData = port.peek<DensityModificationInfo>();
+      
+      // If the kernel has already sent that it is finished
+      if (m_Done[inputData.kernelData.tid])
+      {
+        std::cerr << "ERROR: ComputeDensitiesMTWorker " << inputData.kernelData.tid << " already marked as completed!" << std::endl;
+        exit(EXIT_FAILURE);
+      }
+
+      // If the kernel is sending word that it is finished
+      if (inputData.kernelData.done)
+      {
+        m_Done[inputData.kernelData.tid] = true;
+        port.recycle(1);
+        continue;
+      }
+      
+      // Perform the density set operation
+      inputData.cell->density[inputData.index] += inputData.tc;
+      port.recycle(1);
+    }
+  }
+
+  // If all the ports are marked as done, we're finished with this kernel.
+  bool done = true;
+  for (auto i = 0; i < m_ThreadCount; i++)
+    if (!(m_Done[i]))
+      done = false;
+
+  if (done)
+    output["output"].push<bool>(true);
+
+  return raft::proceed;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 void ComputeDensities2MT(int tid)
@@ -928,6 +1064,149 @@ void ComputeForcesMT(int tid)
           }
         }
       }
+}
+
+ComputeForcesMTWorker::ComputeForcesMTWorker()
+{
+  // Create our input port (tid)
+  input.addPort<int>("input");
+
+  // Create the output port (tid)
+  output.addPort<int>("output_tid");
+
+  // Create an output port for modifying density values in a thread-safe way
+  output.addPort<AccelerationModificationInfo>("output_acceleration");
+}
+
+raft::kstatus ComputeForcesMTWorker::run()
+{
+  int tid = input["input"].peek<int>();
+
+  int neighCells[3*3*3];
+
+  for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
+    for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
+      for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
+      {
+        int index = (iz*ny + iy)*nx + ix;
+        int np = cnumPars[index];
+        if(np == 0)
+          continue;
+
+        int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells);
+
+        Cell *cell = &cells[index];
+        for(int ipar = 0; ipar < np; ++ipar)
+        {
+          for(int inc = 0; inc < numNeighCells; ++inc)
+          {
+            int indexNeigh = neighCells[inc];
+            Cell *neigh = &cells[indexNeigh];
+            int numNeighPars = cnumPars[indexNeigh];
+            for(int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh)
+            {
+              //Check address to make sure forces are computed only once per pair
+              if(&neigh->p[iparNeigh % PARTICLES_PER_CELL] < &cell->p[ipar % PARTICLES_PER_CELL])
+              {
+                Vec3 disp = cell->p[ipar % PARTICLES_PER_CELL] - neigh->p[iparNeigh % PARTICLES_PER_CELL];
+                fptype distSq = disp.GetLengthSq();
+                if(distSq < hSq)
+                {
+                  #ifndef ENABLE_DOUBLE_PRECISION
+                  fptype dist = sqrtf(std::max(distSq, (fptype)1e-12));
+                  #else
+                  fptype dist = sqrt(std::max(distSq, 1e-12));
+                  #endif //ENABLE_DOUBLE_PRECISION
+                  fptype hmr = h - dist;
+
+                  Vec3 acc = disp * pressureCoeff * (hmr*hmr/dist) * (cell->density[ipar % PARTICLES_PER_CELL]+neigh->density[iparNeigh % PARTICLES_PER_CELL] - doubleRestDensity);
+                  acc += (neigh->v[iparNeigh % PARTICLES_PER_CELL] - cell->v[ipar % PARTICLES_PER_CELL]) * viscosityCoeff * hmr;
+                  acc /= cell->density[ipar % PARTICLES_PER_CELL] * neigh->density[iparNeigh % PARTICLES_PER_CELL];
+
+                  output["output_acceleration"].push<AccelerationModificationInfo>(AccelerationModificationInfo(cell, ipar % PARTICLES_PER_CELL, acc, SynchronizeKernelData(tid, false)));
+                  output["output_acceleration"].push<AccelerationModificationInfo>(AccelerationModificationInfo(neigh, iparNeigh % PARTICLES_PER_CELL, -acc, SynchronizeKernelData(tid, false)));
+                }
+              }
+              //move pointer to next cell in list if end of array is reached
+              if(iparNeigh % PARTICLES_PER_CELL == PARTICLES_PER_CELL-1) {
+                neigh = neigh->next;
+              }
+            }
+          }
+          //move pointer to next cell in list if end of array is reached
+          if(ipar % PARTICLES_PER_CELL == PARTICLES_PER_CELL-1) {
+            cell = cell->next;
+          }
+        }
+      }
+
+  // Tell the acceleration mod kernel that we're done with our work
+  output["output_density"].push<AccelerationModificationInfo>(AccelerationModificationInfo(nullptr, -1, Vec3(), SynchronizeKernelData(tid, true)));
+  
+  // Push our output and cleanup
+  output["output_tid"].push<int>(tid);
+  input["input"].recycle();
+
+  return raft::proceed;
+}
+
+AccelerationModificationKernel::AccelerationModificationKernel(int threadCount)
+  : raft::parallel_k(), m_ThreadCount(threadCount)
+{
+  // The output port which will notify the next kernel that this is finished.
+  output.addPort<bool>("output");
+
+  // Add input ports
+  for (auto i = 0; i < m_ThreadCount; i++)
+    addPortTo<AccelerationModificationInfo>(input);
+
+  m_Done = new bool[m_ThreadCount];
+
+  for (auto i = 0; i < m_ThreadCount; i++)
+    m_Done[i] = 0;
+}
+
+raft::kstatus AccelerationModificationKernel::run()
+{
+  // Check each port for new data
+  for (auto &port : input)
+  {
+    // Loop will only run if port has size > 0
+    for (size_t i = 0; i < port.size(); i++)
+    {
+      AccelerationModificationInfo inputData = port.peek<AccelerationModificationInfo>();
+      
+      // If the kernel has already sent that it is finished
+      if (m_Done[inputData.kernelData.tid])
+      {
+        std::cerr << "ERROR: ComputeForcesMTWorker " << inputData.kernelData.tid << " already marked as completed!" << std::endl;
+        exit(EXIT_FAILURE);
+      }
+
+      // If the kernel is sending word that it is finished
+      if (inputData.kernelData.done)
+      {
+        m_Done[inputData.kernelData.tid] = true;
+        port.recycle(1);
+        continue;
+      }
+      
+      // Perform the acceleration set operation
+      inputData.cell->a[inputData.index] += inputData.acc;
+      port.recycle(1);
+    }
+  }
+
+  // If all the ports are marked as done, we're finished with this kernel.
+  bool done = true;
+  for (auto i = 0; i < m_ThreadCount; i++)
+    if (!(m_Done[i]))
+      done = false;
+
+  if (done)
+    output["output"].push<bool>(true);
+
+  return raft::proceed;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

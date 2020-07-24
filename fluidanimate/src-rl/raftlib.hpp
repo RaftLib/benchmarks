@@ -31,6 +31,15 @@ struct Grid
   };
 };
 
+struct SynchronizeKernelData
+{
+  int tid;
+  bool done;
+
+  SynchronizeKernelData() {}
+  SynchronizeKernelData(int tid, bool done) : tid(tid), done(done) {}
+};
+
 class ClearParticlesMTWorker : public raft::kernel
 {
 public:
@@ -45,11 +54,67 @@ public:
     virtual raft::kstatus run();
 };
 
+struct DensityModificationInfo
+{
+  Cell* cell;
+  int index;
+  fptype tc;
+  SynchronizeKernelData kernelData;
+
+  DensityModificationInfo() {}
+  DensityModificationInfo(Cell* cell, int index, fptype tc, SynchronizeKernelData kernelData) : cell(cell), index(index), tc(tc), kernelData(kernelData) {}
+};
+
+class ComputeDensitiesMTWorker : public raft::kernel
+{
+public:
+  ComputeDensitiesMTWorker();
+  virtual raft::kstatus run();
+};
+
+class DensityModificationKernel : public raft::parallel_k
+{
+private:
+  int m_ThreadCount;
+  bool* m_Done;
+public:
+  DensityModificationKernel(int threadCount);
+  virtual raft::kstatus run();
+};
+
 class ComputeDensities2MTWorker : public raft::kernel
 {
 public:
     ComputeDensities2MTWorker();
     virtual raft::kstatus run();
+};
+
+struct AccelerationModificationInfo
+{
+  Cell* cell;
+  int index;
+  Vec3 acc;
+  SynchronizeKernelData kernelData;
+
+  AccelerationModificationInfo() {}
+  AccelerationModificationInfo(Cell* cell, int index, Vec3 acc, SynchronizeKernelData kernelData) : cell(cell), index(index), acc(acc), kernelData(kernelData) {}
+};
+
+class ComputeForcesMTWorker : public raft::kernel
+{
+public:
+  ComputeForcesMTWorker();
+  virtual raft::kstatus run();
+};
+
+class AccelerationModificationKernel : public raft::parallel_k
+{
+private:
+  int m_ThreadCount;
+  bool* m_Done;
+public:
+  AccelerationModificationKernel(int threadCount);
+  virtual raft::kstatus run();
 };
 
 class ProcessCollisionsMTWorker : public raft::kernel
@@ -63,6 +128,13 @@ class ProcessCollisions2MTWorker : public raft::kernel
 {
 public:
     ProcessCollisions2MTWorker();
+    virtual raft::kstatus run();
+};
+
+class AdvanceParticlesMTWorker : public raft::kernel
+{
+public:
+    AdvanceParticlesMTWorker();
     virtual raft::kstatus run();
 };
 
