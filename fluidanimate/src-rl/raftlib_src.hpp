@@ -20,13 +20,17 @@
  * 
  */
 
+int fluidanimate(int argc, char *argv[]);
+
 struct Grid
 {
-  union {
+  union
+  {
     struct {
       int sx, sy, sz;
       int ex, ey, ez;
     };
+  
     unsigned char pp[CACHELINE_SIZE];
   };
 };

@@ -12,6 +12,7 @@
 #include <assert.h>
 
 #include "fluid.hpp"
+#include "fluidcmp.hpp"
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -325,7 +326,7 @@ bool parse_args(conf_t *conf, int argc, char *argv[]) {
 ////////////////////////////////////////////////////////////////////////////////
 
 //Returns one of the error codes defined above to indicate any issues (besides text output)
-int main(int argc, char *argv[]) {
+int fluidcmp(int argc, char *argv[]) {
   conf_t conf;
   fluid_t rfluid;
   fluid_t fluid;

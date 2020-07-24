@@ -79,8 +79,8 @@ unsigned int hmgweight(unsigned int x, int *lsb) {
 
   *lsb=-1;
   while(x > 0) {
-    unsigned int temp;
-    temp=(x&mask);
+    //unsigned int temp;
+    //temp=(x&mask);
     if((x&mask) == 1) {
       weight++;
       if(*lsb == -1) *lsb = count;
@@ -104,8 +104,8 @@ void InitSim(char const *fileName, unsigned int threadnum)
   }
   XDIVS = 1<<(lsb/2);
   ZDIVS = 1<<(lsb/2);
-  if(XDIVS*ZDIVS != threadnum) XDIVS*=2;
-  assert(XDIVS * ZDIVS == threadnum);
+  if((unsigned int)(XDIVS*ZDIVS) != threadnum) XDIVS*=2;
+  assert((unsigned int)(XDIVS * ZDIVS) == threadnum);
 
   grids = new struct Grid[NUM_GRIDS];
   assert(sizeof(Grid) <= CACHELINE_SIZE); // as we put and aligh grid on the cacheline size to avoid false-sharing
@@ -1637,7 +1637,7 @@ void AdvanceFrameVisualization()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-int main(int argc, char *argv[])
+int fluidanimate(int argc, char *argv[])
 {
   if(argc < 4 || argc >= 6)
   {
