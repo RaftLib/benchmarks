@@ -47,6 +47,34 @@ public:
     virtual raft::kstatus run();
 };
 
+struct CellModificationInfo
+{
+  Cell* cell2;
+  int index;
+  int j;
+  SynchronizeKernelData kernelData;
+
+  CellModificationInfo() {}
+  CellModificationInfo(Cell* cell2, int index, int j, SynchronizeKernelData kernelData) : cell2(cell2), index(index), j(j), kernelData(kernelData) {}
+};
+
+class RebuildGridMTWorker : public raft::kernel
+{
+public:
+  RebuildGridMTWorker();
+  virtual raft::kstatus run();
+};
+
+class CellModificationKernel : public raft::parallel_k
+{
+private:
+  int m_ThreadCount;
+  bool* m_Done;
+public:
+  CellModificationKernel(int threadCount);
+  virtual raft::kstatus run();
+};
+
 class InitDensitiesAndForcesMTWorker : public raft::kernel
 {
 public:

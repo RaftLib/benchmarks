@@ -655,6 +655,174 @@ void RebuildGridMT(int tid)
       }
 }
 
+RebuildGridMTWorker::RebuildGridMTWorker()
+{
+  // Create our input port (tid)
+  input.addPort<int>("input");
+
+  // Create the output port (tid)
+  output.addPort<int>("output_tid");
+
+  // Create an output port for modifying cell values in a thread-safe way
+  output.addPort<CellModificationInfo>("output_cell");
+}
+
+raft::kstatus RebuildGridMTWorker::run()
+{
+  int tid = input["input"].peek<int>();
+
+  //iterate through source cell lists
+  for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
+    for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
+      for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
+      {
+        int index2 = (iz*ny + iy)*nx + ix;
+        Cell *cell2 = &cells2[index2];
+        int np2 = cnumPars2[index2];
+        //iterate through source particles
+        for(int j = 0; j < np2; ++j)
+        {
+          //get destination for source particle
+          int ci = (int)((cell2->p[j % PARTICLES_PER_CELL].x - domainMin.x) / delta.x);
+          int cj = (int)((cell2->p[j % PARTICLES_PER_CELL].y - domainMin.y) / delta.y);
+          int ck = (int)((cell2->p[j % PARTICLES_PER_CELL].z - domainMin.z) / delta.z);
+
+          if(ci < 0) ci = 0; else if(ci > (nx-1)) ci = nx-1;
+          if(cj < 0) cj = 0; else if(cj > (ny-1)) cj = ny-1;
+          if(ck < 0) ck = 0; else if(ck > (nz-1)) ck = nz-1;
+          #ifdef ENABLE_CFL_CHECK
+          //check that source cell is a neighbor of destination cell
+          bool cfl_cond_satisfied=false;
+          for(int di = -1; di <= 1; ++di)
+            for(int dj = -1; dj <= 1; ++dj)
+              for(int dk = -1; dk <= 1; ++dk)
+              {
+                int ii = ci + di;
+                int jj = cj + dj;
+                int kk = ck + dk;
+                if(ii >= 0 && ii < nx && jj >= 0 && jj < ny && kk >= 0 && kk < nz)
+                {
+                  int index = (kk*ny + jj)*nx + ii;
+                  if(index == index2)
+                  {
+                    cfl_cond_satisfied=true;
+                    break;
+                  }
+                }
+              }
+          if(!cfl_cond_satisfied)
+          {
+            std::cerr << "FATAL ERROR: Courant–Friedrichs–Lewy condition not satisfied." << std::endl;
+            exit(1);
+          }
+          #endif //ENABLE_CFL_CHECK
+
+          int index = (ck*ny + cj)*nx + ci;
+          // this assumes that particles cannot travel more than one grid cell per time step
+          //if(border[index])
+          //  pthread_mutex_lock(&mutex[index][CELL_MUTEX_ID]);
+
+          // Make call to modify cell in other kernel instead of here to avoid lock
+          output["output_cell"].push<CellModificationInfo>(CellModificationInfo(cell2, index, j, SynchronizeKernelData(tid, false)));
+
+          //move pointer to next source cell in list if end of array is reached
+          if(j % PARTICLES_PER_CELL == PARTICLES_PER_CELL-1) {
+            Cell *temp = cell2;
+            cell2 = cell2->next;
+            //return cells to pool that are not statically allocated head of lists
+            if(temp != &cells2[index2]) {
+              //NOTE: This is thread-safe because temp and pool are thread-private, no need to synchronize
+              cellpool_returncell(&pools[tid], temp);
+            }
+          }
+        } // for(int j = 0; j < np2; ++j)
+        //return cells to pool that are not statically allocated head of lists
+        if((cell2 != NULL) && (cell2 != &cells2[index2])) 
+          cellpool_returncell(&pools[tid], cell2);
+      }
+  // Tell the cell mod kernel that we're done with our work
+  output["output_cell"].push<CellModificationInfo>(CellModificationInfo(nullptr, -1, -1, SynchronizeKernelData(tid, true)));
+  
+  // Push our output and cleanup
+  output["output_tid"].push<int>(tid);
+  input["input"].recycle();
+}
+
+CellModificationKernel::CellModificationKernel(int threadCount)
+  : raft::kernel(), m_ThreadCount(threadCount)
+{
+  // The output port which will notify the next kernel that this is finished.
+  output.addPort<bool>("output");
+
+  // Add input ports
+  for (auto i = 0; i < m_ThreadCount; i++)
+    input.addPort<CellModificationInfo>(std::to_string(i).c_str());
+
+  m_Done = new bool[m_ThreadCount];
+
+  for (auto i = 0; i < m_ThreadCount; i++)
+    m_Done[i] = 0;
+}
+
+raft::kstatus CellModificationKernel::run()
+{
+  // Check each port for new data
+  for (auto &port : input)
+  {
+    // Loop will only run if port has size > 0
+    for (size_t i = 0; i < port.size(); i++)
+    {
+      CellModificationInfo inputData = port.peek<CellModificationInfo>();
+      
+      // If the kernel has already sent that it is finished
+      if (m_Done[inputData.kernelData.tid])
+      {
+        std::cerr << "ERROR: RebuildGridMTWorker " << inputData.kernelData.tid << " already marked as completed!" << std::endl;
+        exit(EXIT_FAILURE);
+      }
+
+      // If the kernel is sending word that it is finished
+      if (inputData.kernelData.done)
+      {
+        m_Done[inputData.kernelData.tid] = true;
+        port.recycle(1);
+        continue;
+      }
+      
+      // Perform the cell set operation
+      Cell *cell = last_cells[inputData.index];
+      int np = cnumPars[inputData.index];
+
+      //add another cell structure if everything full
+      if( (np % PARTICLES_PER_CELL == 0) && (cnumPars[inputData.index] != 0) ) {
+        cell->next = cellpool_getcell(&pools[inputData.kernelData.tid]);
+        cell = cell->next;
+        last_cells[inputData.index] = cell;
+      }
+      ++cnumPars[inputData.index];
+
+      //copy source to destination particle
+          
+      cell->p[np % PARTICLES_PER_CELL]  = inputData.cell2->p[inputData.j % PARTICLES_PER_CELL];
+      cell->hv[np % PARTICLES_PER_CELL] = inputData.cell2->hv[inputData.j % PARTICLES_PER_CELL];
+      cell->v[np % PARTICLES_PER_CELL]  = inputData.cell2->v[inputData.j % PARTICLES_PER_CELL];
+
+      port.recycle(1);
+    }
+  }
+
+  // If all the ports are marked as done, we're finished with this kernel.
+  bool done = true;
+  for (auto i = 0; i < m_ThreadCount; i++)
+    if (!(m_Done[i]))
+      done = false;
+
+  if (done)
+    output["output"].push<bool>(true);
+
+  return raft::proceed;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 int InitNeighCellList(int ci, int cj, int ck, int *neighCells)
@@ -881,14 +1049,14 @@ raft::kstatus ComputeDensitiesMTWorker::run()
 }
 
 DensityModificationKernel::DensityModificationKernel(int threadCount)
-  : raft::parallel_k(), m_ThreadCount(threadCount)
+  : raft::kernel(), m_ThreadCount(threadCount)
 {
   // The output port which will notify the next kernel that this is finished.
   output.addPort<bool>("output");
 
   // Add input ports
   for (auto i = 0; i < m_ThreadCount; i++)
-    addPortTo<DensityModificationInfo>(input);
+    input.addPort<DensityModificationInfo>(std::to_string(i).c_str());
 
   m_Done = new bool[m_ThreadCount];
 
@@ -1074,7 +1242,7 @@ ComputeForcesMTWorker::ComputeForcesMTWorker()
   // Create the output port (tid)
   output.addPort<int>("output_tid");
 
-  // Create an output port for modifying density values in a thread-safe way
+  // Create an output port for modifying acceleration values in a thread-safe way
   output.addPort<AccelerationModificationInfo>("output_acceleration");
 }
 
@@ -1151,14 +1319,14 @@ raft::kstatus ComputeForcesMTWorker::run()
 }
 
 AccelerationModificationKernel::AccelerationModificationKernel(int threadCount)
-  : raft::parallel_k(), m_ThreadCount(threadCount)
+  : raft::kernel(), m_ThreadCount(threadCount)
 {
   // The output port which will notify the next kernel that this is finished.
   output.addPort<bool>("output");
 
   // Add input ports
   for (auto i = 0; i < m_ThreadCount; i++)
-    addPortTo<AccelerationModificationInfo>(input);
+    input.addPort<AccelerationModificationInfo>(std::to_string(i).c_str());
 
   m_Done = new bool[m_ThreadCount];
 
