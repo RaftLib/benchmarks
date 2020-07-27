@@ -5,7 +5,7 @@
 #include <cassert>
 #include <iostream>
 #include <type_traits>
-
+#if 0
 #include "util.h"
 #include "debug.h"
 #include "dedupdef.h"
@@ -13,49 +13,43 @@
 #include "decoder.h"
 #include "config.h"
 #include "queue.h"
+#endif
 
 #include <raft>
 #include <raftio>
 #include <cmd>
 
-extern config_t * conf;
+//extern config_t * conf;
 
 /**
  * used interface found here:
  * http://www.bzip.org/1.0.3/html/hl-interface.html
  */
 
-class Prod: public raft::parallel_k
+class Prod: public raft::kernel
 {
     private: 
-        int num;
+        int num = 0;
 
     public:
-        Prod() : raft::parallel_k()
+        Prod() : raft::kernel()
         {
-            addPortTo<int>(output);
-            num = 0;
+            output.addPort< int >( "output" );
         }
 
         virtual ~Prod() = default;
 
-        virtual raft::kstatus run()
+        virtual raft::kstatus run() override
         {
-            if(num < 10){
-                for (auto &port : output)
-                {
-                    auto &product( port.template allocate<int>() );
-                    product = num;
-                    port.send();
-                    num++;
-                }
+            output[ "output" ].push( num++ );
+            if( num < 100 )
+            {
+                return( raft::proceed );
             }
-
-            else{
-                return (raft::stop);
+            else
+            {
+                return( raft::stop );
             }
-
-            return (raft::proceed);
         }
 };
 
@@ -63,24 +57,24 @@ class Prod: public raft::parallel_k
 
 class Kernel: public raft::kernel
 {
-    private:
-        int elm;
     public:
         Kernel() : raft::kernel()
         {
             input.addPort<int>("in");
         }
 
-        virtual raft::kstatus run()
+        virtual ~Kernel() = default;
+
+        virtual raft::kstatus run() override
         {
-            auto &in((this)->input["in"]);
-            auto &elm(in.template peek<int>());
-            printf ("Elm: %d\n", elm);
-            in.recycle(1);
-            return(raft::proceed);
-            
+            int elm;
+            input[ "in" ].pop( elm );
+            std::cout << "Elm: " << elm << "\n";
+            return( raft::proceed );
         }
 };
+
+
 /*--------------------------------------------------------------------------*/
 static void
 usage(char* prog)
@@ -100,7 +94,7 @@ usage(char* prog)
 int
 main( int argc, char **argv )
 {
-
+#if 0
 
     int32 compress = TRUE;
 
@@ -175,6 +169,8 @@ main( int argc, char **argv )
         }
   }
 
+    std::cout << "Got through initialization\n";
+
 #ifndef ENABLE_GZIP_COMPRESSION
  if (conf->compress_type == COMPRESS_GZIP){
     printf("Gzip compression not supported\n");
@@ -195,6 +191,8 @@ main( int argc, char **argv )
     exit(1);
   }
 #endif
+    
+    std::cout << "Got through selection of options\n";
 
     /*if (compress) {
         Encode(conf);
@@ -204,14 +202,14 @@ main( int argc, char **argv )
     }*/
 
     //free(conf);
-
-    Prod producer;
-    Kernel kernel;
+#endif
+    Prod    producer;
+    Kernel  k;
 
     raft::map m;
-    m += producer >> kernel;
+    m += producer[ "output" ] >> k[ "in" ];
     m.exe();
-
+    std::cout << "done executing graph\n";
     return (EXIT_SUCCESS);
 
 }

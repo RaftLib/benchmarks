@@ -276,6 +276,7 @@ int sub_Deduplicate(chunk_t *chunk) {
 void sub_Compress(chunk_t *chunk) {
     size_t n;
     int r;
+    unsigned int int_n = 0;
 
     assert(chunk!=NULL);
     //compress the item and add it to the database
@@ -323,8 +324,14 @@ void sub_Compress(chunk_t *chunk) {
           EXIT_TRACE("Creation of compression buffer failed.\n");
         }
         //compress the block
-        unsigned int int_n = n;
-        r = BZ2_bzBuffToBuffCompress(chunk->compressed_data.ptr, &int_n, chunk->uncompressed_data.ptr, chunk->uncompressed_data.n, 9, 0, 30);
+        int_n = n;
+        r = BZ2_bzBuffToBuffCompress(   (char*)chunk->compressed_data.ptr, 
+                                        (unsigned int*)&int_n, 
+                                        (char*)chunk->uncompressed_data.ptr, 
+                                        chunk->uncompressed_data.n, 
+                                        9, 
+                                        0, 
+                                        30 );
         n = int_n;
         if (r != BZ_OK) {
           EXIT_TRACE("Compression failed\n");
@@ -337,7 +344,9 @@ void sub_Compress(chunk_t *chunk) {
         break;
 #endif //ENABLE_BZIP2_COMPRESSION
       default:
-        EXIT_TRACE("Compression type not implemented.\n");
+        {
+          EXIT_TRACE("Compression type not implemented.\n");
+        }
         break;
     }
     mbuffer_free(&chunk->uncompressed_data);
@@ -522,7 +531,6 @@ class Read: public raft::kernel
             auto c(output["out"].template allocate_s<chunk_t>());
             assert (chunk);
             *c = *chunk;
-            printf("chunk : %d\n", *chunk);
             output["output"].send();
 
             if (status == -1)
@@ -666,7 +674,8 @@ void *SerialIntegratedPipeline(void * targs) {
   int r;
 
   RaftPipeline(targs);
-  return;
+  //@masri - is this where you intended to return??
+  return( nullptr );
 
   chunk_t *temp = NULL;
   chunk_t *chunk = NULL;
@@ -700,6 +709,12 @@ void *SerialIntegratedPipeline(void * targs) {
       EXIT_TRACE("Input buffer size exceeds system maximum.\n");
     }
     //Allocate a new chunk and create a new memory buffer
+    /**
+     * @Masri - I'd instead of doing this, allocate using
+     * the port directly, so allocate a chunk on the output
+     * port, use it, then send it. That way you don't have 
+     * a local chunk buffer hanging around. 
+     */
     chunk = (chunk_t *)malloc(sizeof(chunk_t));
     if(chunk==NULL) EXIT_TRACE("Memory allocation failed.\n");
     r = mbuffer_create(&chunk->uncompressed_data, MAXBUF+bytes_left);
