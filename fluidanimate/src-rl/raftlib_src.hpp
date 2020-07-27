@@ -105,6 +105,24 @@ public:
   virtual raft::kstatus run();
 };
 
+
+
+class RebuildGridMTWorker2 : public raft::kernel
+{
+public:
+  RebuildGridMTWorker2();
+  virtual raft::kstatus run();
+};
+
+class RebuildGridMTWorker3 : public raft::kernel
+{
+public:
+  RebuildGridMTWorker3();
+  virtual raft::kstatus run();
+};
+
+
+
 class CellModificationKernel : public raft::kernel
 {
 private:
