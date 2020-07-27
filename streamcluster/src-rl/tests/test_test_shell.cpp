@@ -1,4 +1,4 @@
-#include "../streamcluster.hpp"
+#include "streamcluster.hpp"
 
 // This test uses the "test" runconfig
 // This is equivalent to calling ./streamcluster 2 5 1 10 10 5 none output.txt 1
@@ -27,7 +27,7 @@ int main()
 
     // Compare the actual output to the expected output
     std::ifstream actualStream("output_test.txt");
-    std::ifstream expectedStream("../../tests/expected_test.txt");
+    std::ifstream expectedStream( "@EXPECTED_TEST@" );
 
     if (actualStream && expectedStream)
     {
