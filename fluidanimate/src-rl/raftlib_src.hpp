@@ -5,7 +5,7 @@
 #include <raft>
 
 //Comment to disable use of mutex locks in RebuildGridMT execution
-//#define USE_MUTEX
+#define USE_MUTEX
 
 /**
  *  Executes fluidanimate with the given parameters
@@ -122,8 +122,17 @@ private:
   Cell* cell2;
   int np2;
   int j;
+  bool firstTime;
 public:
   RebuildGridMTWorker1();
+  virtual raft::kstatus run();
+};
+
+class RebuildGridMTMain : public raft::kernel
+{
+private:
+public:
+  RebuildGridMTMain();
   virtual raft::kstatus run();
 };
 

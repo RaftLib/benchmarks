@@ -1,14 +1,14 @@
-#include "../raftlib_src.hpp"
-#include "../fluidcmp.hpp"
+#include "raftlib_src.hpp"
+#include "fluidcmp.hpp"
 
 // This test uses the "simlarge" runconfig
 // This is equivalent to calling ./fluidanimate 4 5 in_300K.fluid output_simlarge.fluid
 int main()
 {
-    char* argv[] = {"./fluidanimate", "4", "5", "../../tests/in_300K.fluid", "output_simlarge.fluid"};
+    char* argv[] = {strdup("./fluidanimate"), strdup("4"), strdup("5"), strdup("@IN_300K@"), strdup("output_simlarge.fluid")};
     fluidanimate(5, argv);
 
-    char* argv2[] = {"./fluidcmp", "output_simlarge.fluid", "../../tests/expected_simlarge.fluid"};
+    char* argv2[] = {strdup("./fluidcmp"), strdup("output_simlarge.fluid"), strdup("@EXPECTED_SIMLARGE@")};
     int result = fluidcmp(3, argv2);
 
     if (result != 0)

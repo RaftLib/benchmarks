@@ -746,13 +746,24 @@ raft::kstatus RebuildGridMTWorker::run()
 
 #else
 
+RebuildGridMTMain::RebuildGridMTMain()
+  : raft::kernel()
+{
+  input.addPort<int>("input_tid");
+  input.addPort<int>("continue");
+  output.addPort<int>("output");
+}
+
+raft::kstatus RebuildGridMTMain::run()
+{
+  return raft::proceed;
+}
+
 RebuildGridMTWorker1::RebuildGridMTWorker1()
-  : raft::kernel(), iz(0), iy(0), ix(0), index2(0), np2(0), j(0)
+  : raft::kernel(), iz(0), iy(0), ix(0), index2(0), np2(0), j(0), firstTime(true)
 {
   // Create our input port (tid)
   input.addPort<int>("input");
-
-  input.addPort<int>("input_continue");
 
   output.addPort<CellModificationInfo>("output_cell");
 
@@ -761,17 +772,16 @@ RebuildGridMTWorker1::RebuildGridMTWorker1()
 
 raft::kstatus RebuildGridMTWorker1::run()
 {
-  bool firstTime = false;
-  if (input["input"].size() > 0)
+  if (firstTime)
   {
     tid = input["input"].peek<int>();
-    input["input"].recycle();
 
     index2 = (iz*ny + iy)*nx + ix;
     cell2 = &cells2[index2];
     np2 = cnumPars2[index2];
-    firstTime = true;
   }
+
+  firstTime = false;
 
   if (iz < grids[tid].ez)
   {
@@ -805,8 +815,6 @@ raft::kstatus RebuildGridMTWorker1::run()
     {
       ix++;
       j = 0;
-
-
     }
     if (ix >= grids[tid].ex)
     {
@@ -819,13 +827,14 @@ raft::kstatus RebuildGridMTWorker1::run()
       iy = 0;
     }
 
-    if (!firstTime)
-      input["input_continue"].recycle();
+    input["input"].recycle();
 
     return raft::proceed;
   }
   else
   {
+    input["input"].recycle();
+
     // Tell the cell mod kernel that we're done with our work
     output["output_cell"].push<CellModificationInfo>(CellModificationInfo(nullptr, -1, -1, -1, SynchronizeKernelData(tid, true)));
 
@@ -938,7 +947,7 @@ RebuildGridMTWorker2::RebuildGridMTWorker2()
   input.addPort<CellModificationInfo>("input");
 
   // Create the output port (tid)
-  output.addPort<int>("output");
+  output.addPort<double>("output");
 }
 
 raft::kstatus RebuildGridMTWorker2::run()
@@ -1743,6 +1752,7 @@ void AdvanceFrameMT(int threadnum)
   SimpleAccumulatorKernel simpleAccumRebuild(threadnum);
   #ifndef USE_MUTEX
   CellModificationKernel cellModificationKernel(threadnum);
+  RebuildGridMTMain rebuildGridMTMains[threadnum];
   RebuildGridMTWorker1 rebuildGridMTWorker1s[threadnum];
   RebuildGridMTWorker2 rebuildGridMTWorker2s[threadnum];
   #else
@@ -1780,10 +1790,16 @@ void AdvanceFrameMT(int threadnum)
     m += simpleAccum1[val] >> rebuildGridMTWorkers[i];
     m += rebuildGridMTWorkers[i] >> simpleAccumRebuild[val];
     #else
-    m += rebuildGridMTWorker2s[i] >> rebuildGridMTWorker1s[i]["input_continue"];
-    m += simpleAccum1[val] >> rebuildGridMTWorker1s[i]["input"];
+    //m += rebuildGridMTWorker2s[i] >> rebuildGridMTWorker1s[i]["input_continue"];
+    //m += simpleAccum1[val] >> rebuildGridMTWorker1s[i]["input"];
+    //m += rebuildGridMTWorker1s[i]["output_tid"] >> simpleAccumRebuild[val];
+    //m += rebuildGridMTWorker1s[i]["output_cell"] >> cellModificationKernel[val];
+    m += rebuildGridMTWorker2s[i] >> rebuildGridMTMains[i]["continue"];
+    m += simpleAccum1[val] >> rebuildGridMTMains[i]["input_tid"];
+    m += rebuildGridMTMains[i] >> rebuildGridMTWorker1s[i];
     m += rebuildGridMTWorker1s[i]["output_tid"] >> simpleAccumRebuild[val];
     m += rebuildGridMTWorker1s[i]["output_cell"] >> cellModificationKernel[val];
+
     m += cellModificationKernel[val] >> rebuildGridMTWorker2s[i];
 
     #endif
