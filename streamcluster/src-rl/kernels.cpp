@@ -30,6 +30,8 @@
 #include "kernels.hpp"
 #include <limits>
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 PStreamReader::PStreamReader(PStream* stream, float* block, int dim, long chunkSize, bool* shouldContinue, long* IDoffset)
     : raft::kernel(), m_Stream(stream), m_Dim(dim), m_ChunkSize(chunkSize), m_Block(block), m_Continue(shouldContinue), m_IDoffset(IDoffset)
 {
@@ -64,6 +66,8 @@ raft::kstatus PStreamReader::run()
 
     return raft::stop;
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 LocalSearchStarter::LocalSearchStarter(Points* points, Points* centers, unsigned int threadCount, bool** isCenter, int** centerTable, bool** switchMembership)
     : raft::kernel(), m_Points(points), m_Centers(centers), m_ThreadCount(threadCount), m_IsCenter(isCenter), m_CenterTable(centerTable), m_SwitchMembership(switchMembership)
@@ -118,6 +122,8 @@ raft::kstatus LocalSearchStarter::run()
 
     return raft::proceed;
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 PKMedianWorker::PKMedianWorker() 
     : raft::kernel()
@@ -219,6 +225,8 @@ raft::kstatus PKMedianAccumulator1::run()
 
     return raft::proceed;
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 PSpeedyCallManager::PSpeedyCallManager(unsigned int threadCount, long kmin, unsigned int SP) 
     : raft::kernel(), m_kMin(kmin), m_SP(SP), m_ThreadCount(threadCount)
@@ -434,6 +442,8 @@ raft::kstatus PSpeedyWorkerConsumer::run()
     return raft::proceed;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 SelectFeasible_FastKernel::SelectFeasible_FastKernel(int kmin, unsigned int ITER, bool** is_center)
     : raft::kernel(), m_kMin(kmin), m_ITER(ITER), m_IsCenter(is_center)
 {
@@ -520,6 +530,8 @@ raft::kstatus SelectFeasible_FastKernel::run()
 
     return raft::proceed;
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 PGainCallManager::PGainCallManager(unsigned int CACHE_LINE, unsigned int threadCount, PGainCallManager_Input inputData)
     : raft::kernel(), m_CL(CACHE_LINE / sizeof(double)), m_ThreadCount(threadCount), m_InputData(inputData)
@@ -957,6 +969,8 @@ raft::kstatus PGainAccumulator5::run()
     return raft::proceed;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 PFLCallManager::PFLCallManager(unsigned int CL, bool** isCenter, bool** switchMembership, int** centerTable, unsigned int threadCount, PFLCallManager_Input inputData)
     : raft::kernel(), m_CL(CL), m_IsCenter(isCenter), m_CenterTable(centerTable), m_SwitchMembership(switchMembership), m_ThreadCount(threadCount), m_InputData(inputData)
 {
@@ -1051,6 +1065,8 @@ raft::kstatus PFLCallConsumer::run()
     return raft::proceed;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 PKMedianAccumulator2::PKMedianAccumulator2(unsigned int CACHE_LINE, long kmin, long kmax, long* kfinal, unsigned int ITER, bool** isCenter, int** centerTable, bool** switchMembership, unsigned int threadCount)
     : raft::kernel(), m_kMin(kmin), m_kMax(kmax), m_kFinal(kfinal), m_ITER(ITER), m_IsCenter(isCenter), m_SwitchMembership(switchMembership), m_CenterTable(centerTable), m_CL(CACHE_LINE), m_ThreadCount(threadCount)
 {
@@ -1123,6 +1139,8 @@ raft::kstatus PKMedianAccumulator2::run()
 
     return raft::proceed;
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ContCentersKernel::ContCentersKernel(Points* points, Points* centers, long* kFinal, long centersize) 
     : raft::kernel(), m_Points(points), m_Centers(centers), m_kFinal(kFinal), m_CenterSize(centersize)
@@ -1198,6 +1216,8 @@ raft::kstatus ContCentersKernel::run()
     return raft::proceed;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 CopyCentersKernel::CopyCentersKernel(Points* points, Points* centers, long* centerIDs, long* offset)
     : raft::kernel(), m_Points(points), m_Centers(centers), m_CenterIDs(centerIDs), m_Offset(offset)
 {
@@ -1234,6 +1254,8 @@ raft::kstatus CopyCentersKernel::run()
 
     return raft::proceed;
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 OutCenterIDsKernel::OutCenterIDsKernel(Points* centers, long* centerIDs, char* outfile)
     : raft::kernel(), m_Centers(centers), m_CenterIDs(centerIDs), m_Outfile(outfile)
@@ -1278,3 +1300,5 @@ raft::kstatus OutCenterIDsKernel::run()
 
     return raft::stop;
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////

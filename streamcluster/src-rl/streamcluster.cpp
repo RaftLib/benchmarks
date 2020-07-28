@@ -43,7 +43,9 @@
 #include "kernels.hpp"
 #define USE_RAFT
 
-// Global variables from original streamCluster program ----------------------------------
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Global variables from original streamCluster program
 
 constexpr static std::uint16_t MAXNAMESIZE = 1024;
 constexpr static std::uint8_t  SEED = 1;
@@ -58,9 +60,9 @@ constexpr static std::uint8_t ITER  = 3;
 
 constexpr static std::uint8_t CACHE_LINE = 64;
 
-// Global variables from original streamCluster program ----------------------------------
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Helper functions -------------------------------------------------------------------------------
+// Helper functions
 
 /**
  * Shuffle points into random order.
@@ -90,7 +92,7 @@ void intshuffle(int *intarray, int length)
   }
 }
 
-// Helper functions -------------------------------------------------------------------------------
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksize, long centersize, char* outfile, int nproc)
 {

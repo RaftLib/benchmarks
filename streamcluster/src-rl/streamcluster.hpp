@@ -43,6 +43,10 @@
 
 #define MAX_PARALLEL_KERNELS 128
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Original streamcluster structs
+
 /* this structure represents a point */
 /* these will be passed around to avoid copying coordinates */
 struct Point 
@@ -66,6 +70,20 @@ struct Points
     std::vector< Point > p; /* the array itself */
 };
 
+struct pkmedian_arg_t
+{
+  Points* points;
+  long kmin;
+  long kmax;
+  long* kfinal;
+  int pid;
+  pthread_barrier_t* barrier;
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Helper functions
+
 /* compute Euclidean distance squared between two points */
 inline float dist( const Point &p1, const Point &p2, const int dim )
 {
@@ -80,15 +98,9 @@ inline float dist( const Point &p1, const Point &p2, const int dim )
 void shuffle(Points*);
 void intshuffle(int *intarray, int length);
 
-struct pkmedian_arg_t
-{
-  Points* points;
-  long kmin;
-  long kmax;
-  long* kfinal;
-  int pid;
-  pthread_barrier_t* barrier;
-};
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Streamcluster stream classes
 
 class PStream {
 public:
@@ -156,6 +168,8 @@ public:
 private:
   FILE* fp;
 };
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
  *  Performs the streamCluster operation and outputs the result to the given file.
