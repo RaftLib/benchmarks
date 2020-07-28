@@ -273,7 +273,7 @@ void print_usage(const char *name) {
 
 // Parse command line arguments
 bool parse_args(conf_t *conf, int argc, char *argv[]) {
-  int i,j;
+  int i;
 
   //Initialize configuration
   assert(conf!=NULL);

@@ -746,24 +746,13 @@ raft::kstatus RebuildGridMTWorker::run()
 
 #else
 
-RebuildGridMTMain::RebuildGridMTMain()
-  : raft::kernel()
-{
-  input.addPort<int>("input_tid");
-  input.addPort<int>("continue");
-  output.addPort<int>("output");
-}
-
-raft::kstatus RebuildGridMTMain::run()
-{
-  return raft::proceed;
-}
-
 RebuildGridMTWorker1::RebuildGridMTWorker1()
   : raft::kernel(), iz(0), iy(0), ix(0), index2(0), np2(0), j(0), firstTime(true)
 {
   // Create our input port (tid)
-  input.addPort<int>("input");
+  input.addPort<int>("input_tid");
+
+  input.addPort<int>("input_continue");
 
   output.addPort<CellModificationInfo>("output_cell");
 
@@ -772,16 +761,17 @@ RebuildGridMTWorker1::RebuildGridMTWorker1()
 
 raft::kstatus RebuildGridMTWorker1::run()
 {
-  if (firstTime)
+  bool firstTime = false;
+  if (input["input_tid"].size() > 0)
   {
-    tid = input["input"].peek<int>();
+    tid = input["input_tid"].peek<int>();
+    input["input_tid"].recycle();
 
     index2 = (iz*ny + iy)*nx + ix;
     cell2 = &cells2[index2];
     np2 = cnumPars2[index2];
+    firstTime = true;
   }
-
-  firstTime = false;
 
   if (iz < grids[tid].ez)
   {
@@ -809,7 +799,6 @@ raft::kstatus RebuildGridMTWorker1::run()
     // Push output
     output["output_cell"].push<CellModificationInfo>(CellModificationInfo(cell2, index, index2, j, SynchronizeKernelData(tid, false)));
 
-
     j++;
     if (j >= np2)
     {
@@ -827,13 +816,14 @@ raft::kstatus RebuildGridMTWorker1::run()
       iy = 0;
     }
 
-    input["input"].recycle();
+    if (!firstTime)
+      input["input_continue"].recycle();
 
     return raft::proceed;
   }
   else
   {
-    input["input"].recycle();
+    input["input_continue"].recycle();
 
     // Tell the cell mod kernel that we're done with our work
     output["output_cell"].push<CellModificationInfo>(CellModificationInfo(nullptr, -1, -1, -1, SynchronizeKernelData(tid, true)));
@@ -1741,38 +1731,37 @@ raft::kstatus AdvanceParticlesMTWorker::run()
 
 void AdvanceFrameMT(int threadnum)
 {
-  std::cout << "Advancing frame" << std::endl;
+  //std::cout << "Advancing frame" << std::endl;
   std::swap(cells, cells2);
   std::swap(cnumPars, cnumPars2);
 
   // Kernel Initialization
   SimpleProducerKernel simpleProducer(threadnum);
-  ClearParticlesMTWorker clearParticlesMTWorkers[threadnum];
+  ClearParticlesMTWorker* clearParticlesMTWorkers[MAX_THREADS];
   SimpleAccumulatorKernel simpleAccum1(threadnum);
   SimpleAccumulatorKernel simpleAccumRebuild(threadnum);
   #ifndef USE_MUTEX
   CellModificationKernel cellModificationKernel(threadnum);
-  RebuildGridMTMain rebuildGridMTMains[threadnum];
-  RebuildGridMTWorker1 rebuildGridMTWorker1s[threadnum];
-  RebuildGridMTWorker2 rebuildGridMTWorker2s[threadnum];
+  RebuildGridMTWorker1 rebuildGridMTWorker1s[MAX_THREADS];
+  RebuildGridMTWorker2 rebuildGridMTWorker2s[MAX_THREADS];
   #else
-  RebuildGridMTWorker rebuildGridMTWorkers[threadnum];
+  RebuildGridMTWorker* rebuildGridMTWorkers[MAX_THREADS];
   #endif
-  InitDensitiesAndForcesMTWorker initDensitiesAndForcesMTWorkers[threadnum];
+  InitDensitiesAndForcesMTWorker* initDensitiesAndForcesMTWorkers[MAX_THREADS];
   SimpleAccumulatorKernel simpleAccum2(threadnum);
-  ComputeDensitiesMTWorker computeDensitiesMTWorkers[threadnum];
+  ComputeDensitiesMTWorker* computeDensitiesMTWorkers[MAX_THREADS];
   DensityModificationKernel densityModificationKernel(threadnum);
   AdvancedAccumulatorKernel advancedAccum2(threadnum);
-  ComputeDensities2MTWorker computeDensities2MTWorkers[threadnum];
+  ComputeDensities2MTWorker* computeDensities2MTWorkers[MAX_THREADS];
   SimpleAccumulatorKernel simpleAccum3(threadnum);
-  ComputeForcesMTWorker computeForcesMTWorkers[threadnum];
+  ComputeForcesMTWorker* computeForcesMTWorkers[MAX_THREADS];
   AccelerationModificationKernel accelerationModificationKernel(threadnum);
   AdvancedAccumulatorKernel advancedAccum3(threadnum);
-  ProcessCollisionsMTWorker processCollisionsMTWorkers[threadnum];
+  ProcessCollisionsMTWorker* processCollisionsMTWorkers[MAX_THREADS];
   SimpleAccumulatorKernel simpleAccum4(threadnum);
-  AdvanceParticlesMTWorker advanceParticlesMTWorkers[threadnum];
+  AdvanceParticlesMTWorker* advanceParticlesMTWorkers[MAX_THREADS];
   SimpleAccumulatorKernel simpleAccum5(threadnum);
-  ProcessCollisions2MTWorker processCollisions2MTWorkers[threadnum];
+  ProcessCollisions2MTWorker* processCollisions2MTWorkers[MAX_THREADS];
   SimpleConsumerKernel simpleConsumer(threadnum);
 
   raft::map m;
@@ -1780,91 +1769,87 @@ void AdvanceFrameMT(int threadnum)
   m += densityModificationKernel >> advancedAccum2["input_mod"];
   m += accelerationModificationKernel >> advancedAccum3["input_mod"];
 
+  
+  for (auto i = 0; i < threadnum; i++)
+  {
+    clearParticlesMTWorkers[i] = new ClearParticlesMTWorker();
+    #ifndef USE_MUTEX
+    rebuildGridMTWorker1s[i] = new RebuildGridMTWorker1();
+    rebuildGridMTWorker2s[i] = new RebuildGridMTWorker2();
+    #else
+    rebuildGridMTWorkers[i] = new RebuildGridMTWorker();
+    #endif
+    initDensitiesAndForcesMTWorkers[i] = new InitDensitiesAndForcesMTWorker();
+    computeDensitiesMTWorkers[i] = new ComputeDensitiesMTWorker();
+    computeDensities2MTWorkers[i] = new ComputeDensities2MTWorker();
+    computeForcesMTWorkers[i] = new ComputeForcesMTWorker();
+    processCollisionsMTWorkers[i] = new ProcessCollisionsMTWorker();
+    processCollisions2MTWorkers[i] = new ProcessCollisions2MTWorker();
+    advanceParticlesMTWorkers[i] = new AdvanceParticlesMTWorker();
+  }
+  
+
   // Map construction
   for (auto i = 0; i < threadnum; i++)
   {
     const char* val = std::to_string(i).c_str();
-    m += simpleProducer[val] >> clearParticlesMTWorkers[i];
-    m += clearParticlesMTWorkers[i] >> simpleAccum1[val];
+    m += simpleProducer[val] >> *(clearParticlesMTWorkers[i]);
+    m += *(clearParticlesMTWorkers[i]) >> simpleAccum1[val];
     #ifdef USE_MUTEX
-    m += simpleAccum1[val] >> rebuildGridMTWorkers[i];
-    m += rebuildGridMTWorkers[i] >> simpleAccumRebuild[val];
+    m += simpleAccum1[val] >> *(rebuildGridMTWorkers[i]);
+    m += *(rebuildGridMTWorkers[i]) >> simpleAccumRebuild[val];
     #else
-    //m += rebuildGridMTWorker2s[i] >> rebuildGridMTWorker1s[i]["input_continue"];
-    //m += simpleAccum1[val] >> rebuildGridMTWorker1s[i]["input"];
-    //m += rebuildGridMTWorker1s[i]["output_tid"] >> simpleAccumRebuild[val];
-    //m += rebuildGridMTWorker1s[i]["output_cell"] >> cellModificationKernel[val];
-    m += rebuildGridMTWorker2s[i] >> rebuildGridMTMains[i]["continue"];
-    m += simpleAccum1[val] >> rebuildGridMTMains[i]["input_tid"];
-    m += rebuildGridMTMains[i] >> rebuildGridMTWorker1s[i];
+    m += rebuildGridMTWorker2s[i] >> rebuildGridMTWorker1s[i]["input_continue"];
+    m += simpleAccum1[val] >> rebuildGridMTWorker1s[i]["input_tid"];
     m += rebuildGridMTWorker1s[i]["output_tid"] >> simpleAccumRebuild[val];
     m += rebuildGridMTWorker1s[i]["output_cell"] >> cellModificationKernel[val];
-
     m += cellModificationKernel[val] >> rebuildGridMTWorker2s[i];
-
     #endif
-
-    m += simpleAccumRebuild[val] >> initDensitiesAndForcesMTWorkers[i];
-    m += initDensitiesAndForcesMTWorkers[i] >> simpleAccum2[val];
-    m += simpleAccum2[val] >> computeDensitiesMTWorkers[i];
-    m += computeDensitiesMTWorkers[i]["output_tid"] >> advancedAccum2[val];
-    m += computeDensitiesMTWorkers[i]["output_density"] >> densityModificationKernel[val];
-    m += advancedAccum2[val] >> computeDensities2MTWorkers[i];
-    m += computeDensities2MTWorkers[i] >> simpleAccum3[val];
-    m += simpleAccum3[val] >> computeForcesMTWorkers[i];
-    m += computeForcesMTWorkers[i]["output_tid"] >> advancedAccum3[val];
-    m += computeForcesMTWorkers[i]["output_acceleration"] >> accelerationModificationKernel[val];
-    m += advancedAccum3[val] >> processCollisionsMTWorkers[i];
-    m += processCollisionsMTWorkers[i] >> simpleAccum4[val];
-    m += simpleAccum4[val] >> advanceParticlesMTWorkers[i];
-    m += advanceParticlesMTWorkers[i] >> simpleAccum5[val];
-    m += simpleAccum5[val] >> processCollisions2MTWorkers[i];
-    m += processCollisions2MTWorkers[i] >> simpleConsumer[val];
+    m += simpleAccumRebuild[val] >> *(initDensitiesAndForcesMTWorkers[i]);
+    m += *(initDensitiesAndForcesMTWorkers[i]) >> simpleAccum2[val];
+    m += simpleAccum2[val] >> *(computeDensitiesMTWorkers[i]);
+    m += (*(computeDensitiesMTWorkers[i]))["output_tid"] >> advancedAccum2[val];
+    m += (*(computeDensitiesMTWorkers[i]))["output_density"] >> densityModificationKernel[val];
+    m += advancedAccum2[val] >> *(computeDensities2MTWorkers[i]);
+    m += *(computeDensities2MTWorkers[i]) >> simpleAccum3[val];
+    m += simpleAccum3[val] >> *(computeForcesMTWorkers[i]);
+    m += (*(computeForcesMTWorkers[i]))["output_tid"] >> advancedAccum3[val];
+    m += (*(computeForcesMTWorkers[i]))["output_acceleration"] >> accelerationModificationKernel[val];
+    m += advancedAccum3[val] >> *(processCollisionsMTWorkers[i]);
+    m += *(processCollisionsMTWorkers[i]) >> simpleAccum4[val];
+    m += simpleAccum4[val] >> *(advanceParticlesMTWorkers[i]);
+    m += *(advanceParticlesMTWorkers[i]) >> simpleAccum5[val];
+    m += simpleAccum5[val] >> *(processCollisions2MTWorkers[i]);
+    m += *(processCollisions2MTWorkers[i]) >> simpleConsumer[val];
   }
 
   // Execute the kernel
   m.exe();
   
+  for (auto i = 0; i < threadnum; i++)
+  {
+    delete clearParticlesMTWorkers[i];
+    #ifndef USE_MUTEX
+    delete rebuildGridMTWorker1s[i];
+    delete rebuildGridMTWorker2s[i];
+    #else
+    delete rebuildGridMTWorkers[i];
+    #endif
+    delete initDensitiesAndForcesMTWorkers[i];
+    delete computeDensitiesMTWorkers[i];
+    delete computeDensities2MTWorkers[i];
+    delete computeForcesMTWorkers[i];
+    delete processCollisionsMTWorkers[i];
+    delete advanceParticlesMTWorkers[i];
+    delete processCollisions2MTWorkers[i];
+  }
 }
 
-#ifndef ENABLE_VISUALIZATION
 void AdvanceFramesMT(int framenum, int threadnum)
 {
   for (auto i = 0; i < framenum; i++)
     AdvanceFrameMT(threadnum);
 }
-#else
-//Frame advancement function for worker threads
-void *AdvanceFramesMT(void *args)
-{
-  thread_args *targs = (thread_args *)args;
-
-#if 1
-  while(1)
-#else
-  for(int i = 0; i < targs->frames; ++i)
-#endif
-  {
-    pthread_barrier_wait(&visualization_barrier);
-    //Phase 1: Compute frame, visualization code blocked
-    AdvanceFrameMT(targs->tid);
-    pthread_barrier_wait(&visualization_barrier);
-    //Phase 2: Visualize, worker threads blocked
-  }
-
-  return NULL;
-}
-
-//Frame advancement function for master thread (executes serial visualization code)
-void AdvanceFrameVisualization()
-{
-    //End of phase 2: Worker threads blocked, visualization code busy (last frame)
-    pthread_barrier_wait(&visualization_barrier);
-    //Phase 1: Visualization thread blocked, worker threads busy (next frame)
-    pthread_barrier_wait(&visualization_barrier);
-    //Begin of phase 2: Worker threads blocked, visualization code busy (next frame)
-}
-#endif //ENABLE_VISUALIZATION
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -1895,7 +1880,7 @@ int fluidanimate(int argc, char *argv[])
 
   InitSim(argv[3], threadnum);
 #ifdef ENABLE_VISUALIZATION
-  InitVisualizationMode(&argc, argv, &AdvanceFrameVisualization, &numCells, &cells, &cnumPars);
+  InitVisualizationMode(&argc, argv, &AdvanceFrameMT, &numCells, &cells, &cnumPars);
 #endif
 
 // *** PARALLEL PHASE *** //

@@ -7,6 +7,9 @@
 //Comment to disable use of mutex locks in RebuildGridMT execution
 #define USE_MUTEX
 
+// To avoid issues with ISO C++
+#define MAX_THREADS 128
+
 /**
  *  Executes fluidanimate with the given parameters
  */
@@ -125,14 +128,6 @@ private:
   bool firstTime;
 public:
   RebuildGridMTWorker1();
-  virtual raft::kstatus run();
-};
-
-class RebuildGridMTMain : public raft::kernel
-{
-private:
-public:
-  RebuildGridMTMain();
   virtual raft::kstatus run();
 };
 
