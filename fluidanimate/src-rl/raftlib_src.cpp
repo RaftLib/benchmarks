@@ -54,7 +54,9 @@ int ZDIVS = 1;  // number of partitions in Z
 
 Grid *grids;
 bool  *border;
+#ifdef USE_MUTEX
 pthread_mutex_t **mutex;
+#endif
 
 typedef struct __thread_args {
   int tid;      //thread id, determines work partition
@@ -231,6 +233,8 @@ void InitSim(char const *fileName, unsigned int threadnum)
 	       break;
            } // for(int dk = -1; dk <= 1; ++dk)
         }
+  
+  #ifdef USE_MUTEX
 
   mutex = new pthread_mutex_t *[numCells];
   for (int i = 0; i < numCells; ++i)
@@ -241,6 +245,8 @@ void InitSim(char const *fileName, unsigned int threadnum)
     for (int j = 0; j < n; ++j)
       pthread_mutex_init(&mutex[i][j], NULL);
   }
+
+  #endif
 
   //make sure Cell structure is multiple of estiamted cache line size
   assert(sizeof(Cell) % CACHELINE_SIZE == 0);
@@ -436,6 +442,8 @@ void CleanUpSim()
   //      render other cell pools unusable so they also have to be destroyed.
   for(int i=0; i<NUM_GRIDS; i++) cellpool_destroy(&pools[i]);
 
+  #ifdef USE_MUTEX
+
   for(int i = 0; i < numCells; ++i)
   {
     assert(CELL_MUTEX_ID < MUTEXES_PER_CELL);
@@ -445,6 +453,8 @@ void CleanUpSim()
     delete[] mutex[i];
   }
   delete[] mutex;
+
+  #endif
 
   delete[] border;
 
@@ -613,6 +623,8 @@ raft::kstatus ClearParticlesMTWorker::run()
 
 ////////////////////////////////////////////////////////////////////////////////
 
+#ifdef USE_MUTEX
+
 RebuildGridMTWorker::RebuildGridMTWorker()
   : raft::kernel()
 {
@@ -732,17 +744,109 @@ raft::kstatus RebuildGridMTWorker::run()
   return raft::proceed;
 }
 
+#else
+
+RebuildGridMTWorker1::RebuildGridMTWorker1()
+  : raft::kernel(), iz(0), iy(0), ix(0), index2(0), np2(0), j(0)
+{
+  // Create our input port (tid)
+  input.addPort<int>("input");
+
+  input.addPort<int>("input_continue");
+
+  output.addPort<CellModificationInfo>("output_cell");
+
+  output.addPort<int>("output_tid");
+}
+
+raft::kstatus RebuildGridMTWorker1::run()
+{
+  bool firstTime = false;
+  if (input["input"].size() > 0)
+  {
+    tid = input["input"].peek<int>();
+    input["input"].recycle();
+
+    index2 = (iz*ny + iy)*nx + ix;
+    cell2 = &cells2[index2];
+    np2 = cnumPars2[index2];
+    firstTime = true;
+  }
+
+  if (iz < grids[tid].ez)
+  {
+    if (j >= np2)
+    {
+      //return cells to pool that are not statically allocated head of lists
+      if((cell2 != NULL) && (cell2 != &cells2[index2])) 
+        cellpool_returncell(&pools[tid], cell2);
+
+      index2 = (iz*ny + iy)*nx + ix;
+      cell2 = &cells2[index2];
+      np2 = cnumPars2[index2];
+    }
+
+    int ci = (int)((cell2->p[j % PARTICLES_PER_CELL].x - domainMin.x) / delta.x);
+    int cj = (int)((cell2->p[j % PARTICLES_PER_CELL].y - domainMin.y) / delta.y);
+    int ck = (int)((cell2->p[j % PARTICLES_PER_CELL].z - domainMin.z) / delta.z);
+
+    if(ci < 0) ci = 0; else if(ci > (nx-1)) ci = nx-1;
+    if(cj < 0) cj = 0; else if(cj > (ny-1)) cj = ny-1;
+    if(ck < 0) ck = 0; else if(ck > (nz-1)) ck = nz-1;
+
+    int index = (ck*ny + cj)*nx + ci;
+
+    // Push output
+    output["output_cell"].push<CellModificationInfo>(CellModificationInfo(cell2, index, index2, j, SynchronizeKernelData(tid, false)));
+
+
+    j++;
+    if (j >= np2)
+    {
+      ix++;
+      j = 0;
+
+
+    }
+    if (ix >= grids[tid].ex)
+    {
+      iy++;
+      ix = 0;
+    }
+    if (iy >= grids[tid].ey)
+    {
+      iz++;
+      iy = 0;
+    }
+
+    if (!firstTime)
+      input["input_continue"].recycle();
+
+    return raft::proceed;
+  }
+  else
+  {
+    // Tell the cell mod kernel that we're done with our work
+    output["output_cell"].push<CellModificationInfo>(CellModificationInfo(nullptr, -1, -1, -1, SynchronizeKernelData(tid, true)));
+
+    // Continue on
+    output["output_tid"].push<int>(tid);
+
+    return raft::stop;
+  }
+}
 
 CellModificationKernel::CellModificationKernel(int threadCount)
   : raft::kernel(), m_ThreadCount(threadCount)
 {
-  // The output port which will notify the next kernel that this is finished.
-  output.addPort<int>("output");
-
-  // Add input ports
+  // Add IO ports
   for (auto i = 0; i < m_ThreadCount; i++)
-    input.addPort<CellModificationInfo>(std::to_string(i).c_str());
+  {
+    const char* val = std::to_string(i).c_str();
+    input.addPort<CellModificationInfo>(val);
+    output.addPort<CellModificationInfo>(val);
 
+  }
   m_Done = new bool[m_ThreadCount];
 
   for (auto i = 0; i < m_ThreadCount; i++)
@@ -762,10 +866,19 @@ raft::kstatus CellModificationKernel::run()
   for (auto i = 0; i < m_ThreadCount; i++)
   {
     const char* val = std::to_string(i).c_str();
+    bool wasInput = false;
+    CellModificationInfo data;
     // Loop will only run if port has size > 0
     for (size_t i = 0; i < input[val].size(); i++)
     {
+      wasInput = true;
       CellModificationInfo inputData = input[val].peek<CellModificationInfo>();
+      data.cell2 = inputData.cell2;
+      data.index = inputData.index;
+      data.index2 = inputData.index2;
+      data.j = inputData.j;
+      data.kernelData.tid = inputData.kernelData.tid;
+      data.kernelData.done = inputData.kernelData.done;
       
       // If the kernel has already sent that it is finished
       if (m_Done[inputData.kernelData.tid])
@@ -802,19 +915,57 @@ raft::kstatus CellModificationKernel::run()
 
       input[val].recycle(1);
     }
+
+    if (wasInput)
+      output[val].push<CellModificationInfo>(data);
   }
 
-  // If all the ports are marked as done, we're finished with this kernel.
   bool done = true;
   for (auto i = 0; i < m_ThreadCount; i++)
     if (!(m_Done[i]))
       done = false;
 
   if (done)
-    output["output"].push<int>(true);
+    return raft::stop;
 
   return raft::proceed;
 }
+
+RebuildGridMTWorker2::RebuildGridMTWorker2()
+  : raft::kernel()
+{
+  // Create our input port (tid)
+  input.addPort<CellModificationInfo>("input");
+
+  // Create the output port (tid)
+  output.addPort<int>("output");
+}
+
+raft::kstatus RebuildGridMTWorker2::run()
+{
+  CellModificationInfo inputData = input["input"].peek<CellModificationInfo>();
+
+  if (inputData.kernelData.done)
+    return raft::proceed;
+
+  //move pointer to next source cell in list if end of array is reached
+  if(inputData.j % PARTICLES_PER_CELL == PARTICLES_PER_CELL-1) {
+    Cell *temp = inputData.cell2;
+    inputData.cell2 = inputData.cell2->next;
+    //return cells to pool that are not statically allocated head of lists
+    if(temp != &cells2[inputData.index2]) {
+      //NOTE: This is thread-safe because temp and pool are thread-private, no need to synchronize
+      cellpool_returncell(&pools[inputData.kernelData.tid], temp);
+    }
+  }
+
+  input["input"].recycle();
+  output["output"].push<int>(inputData.kernelData.tid);
+
+  return raft::proceed;
+}
+
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -860,8 +1011,6 @@ void InitDensitiesAndForcesMT(int tid)
         int np = cnumPars[index];
         for(int j = 0; j < np; ++j)
         {
-          if (!cell)
-            std::cout << "In InitDensitiesAndForcesMT, cell is null!" << std::endl;
           cell->density[j % PARTICLES_PER_CELL] = 0.0;
           cell->a[j % PARTICLES_PER_CELL] = externalAcceleration;
           //move pointer to next cell in list if end of array is reached
@@ -1591,10 +1740,14 @@ void AdvanceFrameMT(int threadnum)
   SimpleProducerKernel simpleProducer(threadnum);
   ClearParticlesMTWorker clearParticlesMTWorkers[threadnum];
   SimpleAccumulatorKernel simpleAccum1(threadnum);
-  RebuildGridMTWorker rebuildGridMTWorkers[threadnum];
   SimpleAccumulatorKernel simpleAccumRebuild(threadnum);
-  //CellModificationKernel cellModificationKernel(threadnum);
-  //AdvancedAccumulatorKernel advancedAccum1(threadnum);
+  #ifndef USE_MUTEX
+  CellModificationKernel cellModificationKernel(threadnum);
+  RebuildGridMTWorker1 rebuildGridMTWorker1s[threadnum];
+  RebuildGridMTWorker2 rebuildGridMTWorker2s[threadnum];
+  #else
+  RebuildGridMTWorker rebuildGridMTWorkers[threadnum];
+  #endif
   InitDensitiesAndForcesMTWorker initDensitiesAndForcesMTWorkers[threadnum];
   SimpleAccumulatorKernel simpleAccum2(threadnum);
   ComputeDensitiesMTWorker computeDensitiesMTWorkers[threadnum];
@@ -1614,7 +1767,6 @@ void AdvanceFrameMT(int threadnum)
 
   raft::map m;
 
-  //m += cellModificationKernel >> advancedAccum1["input_mod"];
   m += densityModificationKernel >> advancedAccum2["input_mod"];
   m += accelerationModificationKernel >> advancedAccum3["input_mod"];
 
@@ -1624,12 +1776,19 @@ void AdvanceFrameMT(int threadnum)
     const char* val = std::to_string(i).c_str();
     m += simpleProducer[val] >> clearParticlesMTWorkers[i];
     m += clearParticlesMTWorkers[i] >> simpleAccum1[val];
+    #ifdef USE_MUTEX
     m += simpleAccum1[val] >> rebuildGridMTWorkers[i];
-    //m += rebuildGridMTWorkers[i]["output_tid"] >> advancedAccum1[val];
-    //m += rebuildGridMTWorkers[i]["output_cell"] >> cellModificationKernel[val];
     m += rebuildGridMTWorkers[i] >> simpleAccumRebuild[val];
-    //m += advancedAccum1[val] >> initDensitiesAndForcesMTWorkers[i];
-    m += simpleAccumRebuild >> initDensitiesAndForcesMTWorkers[i];
+    #else
+    m += rebuildGridMTWorker2s[i] >> rebuildGridMTWorker1s[i]["input_continue"];
+    m += simpleAccum1[val] >> rebuildGridMTWorker1s[i]["input"];
+    m += rebuildGridMTWorker1s[i]["output_tid"] >> simpleAccumRebuild[val];
+    m += rebuildGridMTWorker1s[i]["output_cell"] >> cellModificationKernel[val];
+    m += cellModificationKernel[val] >> rebuildGridMTWorker2s[i];
+
+    #endif
+
+    m += simpleAccumRebuild[val] >> initDensitiesAndForcesMTWorkers[i];
     m += initDensitiesAndForcesMTWorkers[i] >> simpleAccum2[val];
     m += simpleAccum2[val] >> computeDensitiesMTWorkers[i];
     m += computeDensitiesMTWorkers[i]["output_tid"] >> advancedAccum2[val];

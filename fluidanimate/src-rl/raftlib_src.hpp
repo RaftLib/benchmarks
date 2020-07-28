@@ -4,22 +4,12 @@
 #include "fluid.hpp"
 #include <raft>
 
-// Info
-// Main function is AdvanceFrameMT, which calls all of the other functions
-// Goal is to make a kernel out of all of these functions
-/**
- * Kernels
- * 
- * ClearParticlesMT
- * RebuildGridMT * uses mutex lock
- * InitDensitiesAndForcesMT
- * ComputeDensitiesMT * uses mutex lock
- * ComputeForcesMT * uses mutex lock
- * ProcessCollisionsMT
- * AdvanceParticlesMT
- * 
- */
+//Comment to disable use of mutex locks in RebuildGridMT execution
+//#define USE_MUTEX
 
+/**
+ *  Executes fluidanimate with the given parameters
+ */
 int fluidanimate(int argc, char *argv[]);
 
 struct Grid
@@ -35,6 +25,9 @@ struct Grid
   };
 };
 
+/**
+ *  Data contained in other structs which identifies the kernel and its state
+ */
 struct SynchronizeKernelData
 {
   int tid;
@@ -44,6 +37,9 @@ struct SynchronizeKernelData
   SynchronizeKernelData(int tid, bool done) : tid(tid), done(done) {}
 };
 
+/**
+ *  Generic accumulator kernelw which takes in threadCount kernels and pushes to threadCount kernels
+ */
 class SimpleAccumulatorKernel : public raft::kernel_all
 {
 private:
@@ -53,6 +49,9 @@ public:
   virtual raft::kstatus run();
 };
 
+/**
+ *  Generic producer kernel which pushes to threadCount kernels
+ */
 class SimpleProducerKernel : public raft::kernel
 {
 private:
@@ -62,6 +61,9 @@ public:
   virtual raft::kstatus run();
 };
 
+/**
+ *  Generic consumer kernel which consumes threadCount kernels.
+ */
 class SimpleConsumerKernel : public raft::kernel_all
 {
 private:
@@ -71,6 +73,9 @@ public:
   virtual raft::kstatus run();
 };
 
+/**
+ *  Special case accumulator kernel where it will not proceed until an additional kernel is complete.
+ */
 class AdvancedAccumulatorKernel : public raft::kernel_all
 {
 private:
@@ -80,6 +85,9 @@ public:
   virtual raft::kstatus run();
 };
 
+/**
+ *  Kernel wrapper for the ClearParticlesMT function.
+ */
 class ClearParticlesMTWorker : public raft::kernel
 {
 public:
@@ -87,17 +95,11 @@ public:
     virtual raft::kstatus run();
 };
 
-struct CellModificationInfo
-{
-  Cell* cell2;
-  int index;
-  int j;
-  SynchronizeKernelData kernelData;
+#ifdef USE_MUTEX
 
-  CellModificationInfo() {}
-  CellModificationInfo(Cell* cell2, int index, int j, SynchronizeKernelData kernelData) : cell2(cell2), index(index), j(j), kernelData(kernelData) {}
-};
-
+/**
+ *  Wrapper kernel for the RebuildGridMT function.
+ */
 class RebuildGridMTWorker : public raft::kernel
 {
 public:
@@ -105,7 +107,25 @@ public:
   virtual raft::kstatus run();
 };
 
-
+#else
+/**
+ *  Wrapper kernel for the RebuildGridMT function.
+ */
+class RebuildGridMTWorker1 : public raft::kernel
+{
+private:
+  int tid;
+  int iz;
+  int iy;
+  int ix;
+  int index2;
+  Cell* cell2;
+  int np2;
+  int j;
+public:
+  RebuildGridMTWorker1();
+  virtual raft::kstatus run();
+};
 
 class RebuildGridMTWorker2 : public raft::kernel
 {
@@ -114,15 +134,24 @@ public:
   virtual raft::kstatus run();
 };
 
-class RebuildGridMTWorker3 : public raft::kernel
+/**
+ *  Data for the CellModificationKernel to perform an operation.
+ */
+struct CellModificationInfo
 {
-public:
-  RebuildGridMTWorker3();
-  virtual raft::kstatus run();
+  Cell* cell2;
+  int index;
+  int index2;
+  int j;
+  SynchronizeKernelData kernelData;
+
+  CellModificationInfo() {}
+  CellModificationInfo(Cell* cell2, int index, int index2, int j, SynchronizeKernelData kernelData) : cell2(cell2), index(index), index2(index2), j(j), kernelData(kernelData) {}
 };
 
-
-
+/**
+ *  CellModificationKernel is a "thread-safe" kernel for managing writes to cells in RebuildGridMT.
+ */
 class CellModificationKernel : public raft::kernel
 {
 private:
@@ -134,6 +163,11 @@ public:
   virtual raft::kstatus run();
 };
 
+#endif
+
+/**
+ *  Wrapper kernel for the InitDensitiesAndForcesMT function.
+ */
 class InitDensitiesAndForcesMTWorker : public raft::kernel
 {
 public:
@@ -141,6 +175,9 @@ public:
     virtual raft::kstatus run();
 };
 
+/**
+ *  Data for the DensityModificationKernel to perform an operation.
+ */
 struct DensityModificationInfo
 {
   Cell* cell;
@@ -152,6 +189,9 @@ struct DensityModificationInfo
   DensityModificationInfo(Cell* cell, int index, fptype tc, SynchronizeKernelData kernelData) : cell(cell), index(index), tc(tc), kernelData(kernelData) {}
 };
 
+/**
+ *  Wrapper kernel for the ComputeDensitiesMT function.
+ */
 class ComputeDensitiesMTWorker : public raft::kernel
 {
 public:
@@ -159,6 +199,9 @@ public:
   virtual raft::kstatus run();
 };
 
+/**
+ *  DensityModificationKernel is a "thread-safe" kernel for managing writes to cell densities.
+ */
 class DensityModificationKernel : public raft::kernel
 {
 private:
@@ -170,6 +213,9 @@ public:
   virtual raft::kstatus run();
 };
 
+/**
+ *  Wrapper kernel for the ComputeDensities2MT function.
+ */
 class ComputeDensities2MTWorker : public raft::kernel
 {
 public:
@@ -177,6 +223,9 @@ public:
     virtual raft::kstatus run();
 };
 
+/**
+ *  Data for the AccelerationModificationKernel to perform an operation.
+ */
 struct AccelerationModificationInfo
 {
   Cell* cell;
@@ -188,6 +237,9 @@ struct AccelerationModificationInfo
   AccelerationModificationInfo(Cell* cell, int index, Vec3 acc, SynchronizeKernelData kernelData) : cell(cell), index(index), acc(acc), kernelData(kernelData) {}
 };
 
+/**
+ *  Wrapper kernel for the ComputeForcesMT function.
+ */
 class ComputeForcesMTWorker : public raft::kernel
 {
 public:
@@ -195,6 +247,9 @@ public:
   virtual raft::kstatus run();
 };
 
+/**
+ *  AccelerationModificationKernel is a "thread-safe" kernel for managing writes to cell accelerations.
+ */
 class AccelerationModificationKernel : public raft::kernel
 {
 private:
@@ -206,6 +261,9 @@ public:
   virtual raft::kstatus run();
 };
 
+/**
+ *  Wrapper kernel for the ProcessCollisionsMT function.
+ */
 class ProcessCollisionsMTWorker : public raft::kernel
 {
 public:
@@ -213,6 +271,9 @@ public:
     virtual raft::kstatus run();
 };
 
+/**
+ *  Wrapper kernel for the ProcessCollisions2MT function.
+ */
 class ProcessCollisions2MTWorker : public raft::kernel
 {
 public:
@@ -220,6 +281,9 @@ public:
     virtual raft::kstatus run();
 };
 
+/**
+ *  Wrapper kernel for the AdvanceParticlesMT function.
+ */
 class AdvanceParticlesMTWorker : public raft::kernel
 {
 public:

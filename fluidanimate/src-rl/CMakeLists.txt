@@ -6,7 +6,7 @@ SET(NATIVE_TESTS 0 CACHE BOOL "If set, builds the native input set tests.")
 
 PROJECT(fluidanimate CXX)
 
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -W -Wall -Wextra -Wpedantic -std=gnu++17")
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -W -Wall -Wextra -Wpedantic -std=gnu++17 -g")
 
 FIND_PACKAGE(PkgConfig REQUIRED)
 
