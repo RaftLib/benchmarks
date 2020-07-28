@@ -1,7 +1,7 @@
-#include "../streamcluster.hpp"
+#include "streamcluster.hpp"
 
-// This test uses the "simlarge" runconfig
-// This is equivalent to calling ./streamcluster 10 20 128 16384 16384 1000 none output.txt 1
+// This test uses the "native" runconfig
+// This is equivalent to calling ./streamcluster 10 20 128 1000000 200000 5000 none output.txt 4
 
 // Random seed value
 constexpr static std::uint8_t SEED = 1;
@@ -12,22 +12,22 @@ int main()
     srand48(SEED);
 
     // Create the stream
-    PStream* stream = new SimStream(16384);
+    PStream* stream = new SimStream(1000000);
 
     // Set the filename (to avoid issues with const char* conversion)
-    char filename[20];
-    strcpy(filename, "output_simlarge.txt");
-    filename[19] = '\0';
+    char filename[18];
+    strcpy(filename, "output_native.txt");
+    filename[17] = '\0';
 
     // Perform streamCluster, will output to the given filename
-    streamCluster(stream, 10, 20, 128, 16384, 1000, filename, 1);
+    streamCluster(stream, 10, 20, 128, 200000, 5000, filename, 4);
 
     // Delete the stream
     delete stream;
 
     // Compare the actual output to the expected output
-    std::ifstream actualStream("output_simlarge.txt");
-    std::ifstream expectedStream("../../tests/expected_simlarge.txt");
+    std::ifstream actualStream("output_native.txt");
+    std::ifstream expectedStream("@EXPECTED_NATIVE@");
 
     if (actualStream && expectedStream)
     {

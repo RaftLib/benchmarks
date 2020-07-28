@@ -1,8 +1,7 @@
-#include "../streamcluster.hpp"
+#include "streamcluster.hpp"
 
-// This test uses the "test" runconfig
-// This test is multi-threaded using 4 cores
-// This is equivalent to calling ./streamcluster 2 5 1 10 10 5 none output.txt 4
+// This test uses the "simdev" runconfig
+// This is equivalent to calling ./streamcluster 3 10 3 16 16 10 none output.txt 1
 
 // Random seed value
 constexpr static std::uint8_t SEED = 1;
@@ -13,22 +12,22 @@ int main()
     srand48(SEED);
 
     // Create the stream
-    PStream* stream = new SimStream(10);
+    PStream* stream = new SimStream(16);
 
     // Set the filename (to avoid issues with const char* conversion)
-    char filename[16];
-    strcpy(filename, "output_test.txt");
-    filename[15] = '\0';
+    char filename[18];
+    strcpy(filename, "output_simdev.txt");
+    filename[17] = '\0';
 
     // Perform streamCluster, will output to the given filename
-    streamCluster(stream, 2, 5, 1, 10, 5, filename, 4);
+    streamCluster(stream, 3, 10, 3, 16, 10, filename, 1);
 
     // Delete the stream
     delete stream;
 
     // Compare the actual output to the expected output
-    std::ifstream actualStream("output_test.txt");
-    std::ifstream expectedStream("../../tests/expected_test.txt");
+    std::ifstream actualStream("output_simdev.txt");
+    std::ifstream expectedStream("@EXPECTED_SIMDEV@");
 
     if (actualStream && expectedStream)
     {

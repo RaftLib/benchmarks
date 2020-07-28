@@ -1,4 +1,4 @@
-#include "../streamcluster.hpp"
+#include "streamcluster.hpp"
 
 // This test uses the "simdev" runconfig
 // This is equivalent to calling ./streamcluster 3 10 3 16 16 10 none output.txt 4
@@ -27,7 +27,7 @@ int main()
 
     // Compare the actual output to the expected output
     std::ifstream actualStream("output_simdev.txt");
-    std::ifstream expectedStream("../../tests/expected_simdev.txt");
+    std::ifstream expectedStream("@EXPECTED_SIMDEV@");
 
     if (actualStream && expectedStream)
     {
