@@ -110,7 +110,7 @@ void InitSim(char const *fileName, unsigned int threadnum)
   if((unsigned int)(XDIVS*ZDIVS) != threadnum) XDIVS*=2;
   assert((unsigned int)(XDIVS * ZDIVS) == threadnum);
 
-  grids = new struct Grid[NUM_GRIDS];
+  grids = new union Grid[NUM_GRIDS];
   assert(sizeof(Grid) <= CACHELINE_SIZE); // as we put and aligh grid on the cacheline size to avoid false-sharing
                                           // if asserts fails - increase pp union member in Grid declarationi
                                           // and change this macro 
@@ -186,21 +186,21 @@ void InitSim(char const *fileName, unsigned int threadnum)
       ez = (int)((fptype)(nz)/(fptype)(ZDIVS) * (j+1) + 0.5);
       assert(sz < ez);
 
-      grids[gi].sx = sx;
-      grids[gi].ex = ex;
-      grids[gi].sy = 0;
-      grids[gi].ey = ny;
-      grids[gi].sz = sz;
-      grids[gi].ez = ez;
+      grids[gi].ind.sx = sx;
+      grids[gi].ind.ex = ex;
+      grids[gi].ind.sy = 0;
+      grids[gi].ind.ey = ny;
+      grids[gi].ind.sz = sz;
+      grids[gi].ind.ez = ez;
     }
   }
   assert(gi == NUM_GRIDS);
 
   border = new bool[numCells];
   for(int i = 0; i < NUM_GRIDS; ++i)
-    for(int iz = grids[i].sz; iz < grids[i].ez; ++iz)
-      for(int iy = grids[i].sy; iy < grids[i].ey; ++iy)
-        for(int ix = grids[i].sx; ix < grids[i].ex; ++ix)
+    for(int iz = grids[i].ind.sz; iz < grids[i].ind.ez; ++iz)
+      for(int iy = grids[i].ind.sy; iy < grids[i].ind.ey; ++iy)
+        for(int ix = grids[i].ind.sx; ix < grids[i].ind.ex; ++ix)
         {
           int index = (iz*ny + iy)*nx + ix;
           border[index] = false;
@@ -218,9 +218,9 @@ void InitSim(char const *fileName, unsigned int threadnum)
                 if(cj < 0) cj = 0; else if(cj > (ny-1)) cj = ny-1;
                 if(ck < 0) ck = 0; else if(ck > (nz-1)) ck = nz-1;
 
-                if( ci < grids[i].sx || ci >= grids[i].ex ||
-                  cj < grids[i].sy || cj >= grids[i].ey ||
-                  ck < grids[i].sz || ck >= grids[i].ez ) {
+                if( ci < grids[i].ind.sx || ci >= grids[i].ind.ex ||
+                  cj < grids[i].ind.sy || cj >= grids[i].ind.ey ||
+                  ck < grids[i].ind.sz || ck >= grids[i].ind.ez ) {
                       
                     border[index] = true;
 		    break;
@@ -585,9 +585,9 @@ raft::kstatus AdvancedAccumulatorKernel::run()
 
 void ClearParticlesMT(int tid)
 {
-  for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
-    for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
-      for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
+  for(int iz = grids[tid].ind.sz; iz < grids[tid].ind.ez; ++iz)
+    for(int iy = grids[tid].ind.sy; iy < grids[tid].ind.ey; ++iy)
+      for(int ix = grids[tid].ind.sx; ix < grids[tid].ind.ex; ++ix)
       {
         int index = (iz*ny + iy)*nx + ix;
         cnumPars[index] = 0;
@@ -643,9 +643,9 @@ raft::kstatus RebuildGridMTWorker::run()
   int tid = input["input"].peek<int>();
 
   //iterate through source cell lists
-  for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
-    for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
-      for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
+  for(int iz = grids[tid].ind.sz; iz < grids[tid].ind.ez; ++iz)
+    for(int iy = grids[tid].ind.sy; iy < grids[tid].ind.ey; ++iy)
+      for(int ix = grids[tid].ind.sx; ix < grids[tid].ind.ex; ++ix)
       {
         int index2 = (iz*ny + iy)*nx + ix;
         Cell *cell2 = &cells2[index2];
@@ -1001,9 +1001,9 @@ int InitNeighCellList(int ci, int cj, int ck, int *neighCells)
 
 void InitDensitiesAndForcesMT(int tid)
 {
-  for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
-    for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
-      for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
+  for(int iz = grids[tid].ind.sz; iz < grids[tid].ind.ez; ++iz)
+    for(int iy = grids[tid].ind.sy; iy < grids[tid].ind.ey; ++iy)
+      for(int ix = grids[tid].ind.sx; ix < grids[tid].ind.ex; ++ix)
       {
         int index = (iz*ny + iy)*nx + ix;
         Cell *cell = &cells[index];
@@ -1066,9 +1066,9 @@ raft::kstatus ComputeDensitiesMTWorker::run()
 
   int neighCells[3*3*3];
 
-  for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
-    for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
-      for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
+  for(int iz = grids[tid].ind.sz; iz < grids[tid].ind.ez; ++iz)
+    for(int iy = grids[tid].ind.sy; iy < grids[tid].ind.ey; ++iy)
+      for(int ix = grids[tid].ind.sx; ix < grids[tid].ind.ex; ++ix)
       {
         int index = (iz*ny + iy)*nx + ix;
         int np = cnumPars[index];
@@ -1197,9 +1197,9 @@ raft::kstatus DensityModificationKernel::run()
 void ComputeDensities2MT(int tid)
 {
   const fptype tc = hSq*hSq*hSq;
-  for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
-    for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
-      for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
+  for(int iz = grids[tid].ind.sz; iz < grids[tid].ind.ez; ++iz)
+    for(int iy = grids[tid].ind.sy; iy < grids[tid].ind.ey; ++iy)
+      for(int ix = grids[tid].ind.sx; ix < grids[tid].ind.ex; ++ix)
       {
         int index = (iz*ny + iy)*nx + ix;
         Cell *cell = &cells[index];
@@ -1263,9 +1263,9 @@ raft::kstatus ComputeForcesMTWorker::run()
 
   int neighCells[3*3*3];
 
-  for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
-    for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
-      for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
+  for(int iz = grids[tid].ind.sz; iz < grids[tid].ind.ez; ++iz)
+    for(int iy = grids[tid].ind.sy; iy < grids[tid].ind.ey; ++iy)
+      for(int ix = grids[tid].ind.sx; ix < grids[tid].ind.ex; ++ix)
       {
         int index = (iz*ny + iy)*nx + ix;
         int np = cnumPars[index];
@@ -1454,11 +1454,11 @@ void ProcessCollisionsMT(int tid)
 #else
 void ProcessCollisionsMT(int tid)
 {
-  for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
+  for(int iz = grids[tid].ind.sz; iz < grids[tid].ind.ez; ++iz)
   {
-    for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
+    for(int iy = grids[tid].ind.sy; iy < grids[tid].ind.ey; ++iy)
 	{
-      for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
+      for(int ix = grids[tid].ind.sx; ix < grids[tid].ind.ex; ++ix)
       {
 	    if(!((ix==0)||(iy==0)||(iz==0)||(ix==(nx-1))||(iy==(ny-1))==(iz==(nz-1))))
 			continue;	// not on domain wall
@@ -1546,11 +1546,11 @@ raft::kstatus ProcessCollisionsMTWorker::run()
 #if defined(USE_ImpeneratableWall)
 void ProcessCollisions2MT(int tid)
 {
-  for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
+  for(int iz = grids[tid].ind.sz; iz < grids[tid].ind.ez; ++iz)
   {
-    for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
+    for(int iy = grids[tid].ind.sy; iy < grids[tid].ind.ey; ++iy)
 	{
-      for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
+      for(int ix = grids[tid].ind.sx; ix < grids[tid].ind.ex; ++ix)
       {
 #if 0
 // Chris, the following test should be valid
@@ -1669,9 +1669,9 @@ raft::kstatus ProcessCollisions2MTWorker::run()
 
 void AdvanceParticlesMT(int tid)
 {
-  for(int iz = grids[tid].sz; iz < grids[tid].ez; ++iz)
-    for(int iy = grids[tid].sy; iy < grids[tid].ey; ++iy)
-      for(int ix = grids[tid].sx; ix < grids[tid].ex; ++ix)
+  for(int iz = grids[tid].ind.sz; iz < grids[tid].ind.ez; ++iz)
+    for(int iy = grids[tid].ind.sy; iy < grids[tid].ind.ey; ++iy)
+      for(int ix = grids[tid].ind.sx; ix < grids[tid].ind.ex; ++ix)
       {
         int index = (iz*ny + iy)*nx + ix;
         Cell *cell = &cells[index];
@@ -1872,6 +1872,12 @@ int fluidanimate(int argc, char *argv[])
   if(framenum < 1) {
     std::cerr << "<framenum> must at least be 1" << std::endl;
     return -1;
+  }
+
+  if (threadnum > MAX_THREADS)
+  {
+    std::cout << "threadnum exceeds MAX_THREAD def in raftlib_src.hpp" << std::endl;
+    return EXIT_FAILURE;
   }
 
 #ifdef ENABLE_CFL_CHECK

@@ -78,6 +78,7 @@ static struct datablockhdr *cellpool_allocblock(int cells) {
 //particles is used to determine the initial capacity and should correspond to the
 //number of particles that the pool is expected to manage
 void cellpool_init(cellpool *pool, int particles) {
+  (void) timeStep;
   int ALLOC_MIN_CELLS = 1024;
   assert(sizeof(struct datablockhdr) % CACHELINE_SIZE == 0);
   assert(pool != NULL);

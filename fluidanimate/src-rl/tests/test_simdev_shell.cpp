@@ -5,6 +5,7 @@
 // This is equivalent to calling ./fluidanimate 1 3 in_15K.fluid output_simdev.fluid
 int main()
 {
+    (void) timeStep;
     char* argv[] = {strdup("./fluidanimate"), strdup("1"), strdup("3"), strdup("@IN_15K@"), strdup("output_simdev.fluid")};
     fluidanimate(5, argv);
 
