@@ -5,7 +5,7 @@
 #include <raft>
 
 //Comment to disable use of mutex locks in RebuildGridMT execution
-#define USE_MUTEX
+//#define USE_MUTEX
 
 // To avoid issues with ISO C++
 #define MAX_THREADS 128
@@ -14,21 +14,6 @@
  *  Executes fluidanimate with the given parameters
  */
 int fluidanimate(int argc, char *argv[]);
-
-/*
-struct Grid
-{
-  union
-  {
-    struct {
-      int sx, sy, sz;
-      int ex, ey, ez;
-    };
-  
-    unsigned char pp[CACHELINE_SIZE];
-  };
-};
-*/
 
 union Grid
 {
@@ -124,21 +109,36 @@ public:
 };
 
 #else
-/**
- *  Wrapper kernel for the RebuildGridMT function.
- */
-class RebuildGridMTWorker1 : public raft::kernel
+
+struct RebuildGridMTWorker0_Output
+{
+  int tid;
+  int index2;
+  Cell* cell2;
+  int np2;
+  bool done;
+
+  RebuildGridMTWorker0_Output() {}
+  RebuildGridMTWorker0_Output(int tid, int index2, Cell* cell2, int np2, bool done) : tid(tid), index2(index2), cell2(cell2), np2(np2), done(done) {}
+};
+
+class RebuildGridMTWorker0 : public raft::kernel
 {
 private:
   int tid;
   int iz;
   int iy;
   int ix;
-  int index2;
-  Cell* cell2;
-  int np2;
-  int j;
-  bool firstTime;
+public:
+  RebuildGridMTWorker0();
+  virtual raft::kstatus run();
+};
+
+/**
+ *  Wrapper kernel for the RebuildGridMT function.
+ */
+class RebuildGridMTWorker1 : public raft::kernel
+{
 public:
   RebuildGridMTWorker1();
   virtual raft::kstatus run();
@@ -159,11 +159,12 @@ struct CellModificationInfo
   Cell* cell2;
   int index;
   int index2;
+  int np2;
   int j;
   SynchronizeKernelData kernelData;
 
   CellModificationInfo() {}
-  CellModificationInfo(Cell* cell2, int index, int index2, int j, SynchronizeKernelData kernelData) : cell2(cell2), index(index), index2(index2), j(j), kernelData(kernelData) {}
+  CellModificationInfo(Cell* cell2, int index, int index2, int np2, int j, SynchronizeKernelData kernelData) : cell2(cell2), index(index), index2(index2), np2(np2), j(j), kernelData(kernelData) {}
 };
 
 /**
@@ -174,6 +175,7 @@ class CellModificationKernel : public raft::kernel
 private:
   int m_ThreadCount;
   bool* m_Done;
+  int count;
 public:
   CellModificationKernel(int threadCount);
   ~CellModificationKernel();
