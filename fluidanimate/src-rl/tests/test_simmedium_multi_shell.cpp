@@ -1,3 +1,5 @@
+#include <cstring>
+#include <cstdlib>
 #include "raftlib_src.hpp"
 #include "fluidcmp.hpp"
 

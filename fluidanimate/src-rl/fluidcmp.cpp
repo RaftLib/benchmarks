@@ -7,9 +7,12 @@
 #include <iostream>
 #include <fstream>
 
-#include <string.h>
-#include <math.h>
-#include <assert.h>
+//#include <string.h>
+#include <cstring>
+//#include <math.h>
+#include <cmath>
+//#include <assert.h>
+#include <cassert>
 
 #include "fluid.hpp"
 #include "fluidcmp.hpp"
@@ -26,7 +29,7 @@
 int DEFAULT_MAX_MISMATCH_PRINT = 10;
 
 //Configuration as derived from command line arguments
-typedef struct {
+struct conf_t {
   char *file;
   char *rfile;
   //details concerning output
@@ -49,11 +52,11 @@ typedef struct {
     bool doTest;
     float tol;
   } bbox;
-} conf_t;
+};
 
 
 //A fluid as read in from a fluid file
-typedef struct {
+struct fluid_t {
   float restParticlesPerMeter;
   int numParticles;
   Vec3 *p;
@@ -64,17 +67,17 @@ typedef struct {
     Vec3 min;
     Vec3 max;
   } bbox;
-} fluid_t;
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 
 //Allocates the arrays required to store a fluid of size `s'
 void malloc_fluid(fluid_t *f, size_t size) {
-  assert(f!=NULL);
+  assert(f!=nullptr);
   f->p = (Vec3 *)malloc(sizeof(Vec3) * size);
   f->hv = (Vec3 *)malloc(sizeof(Vec3) * size);
   f->v = (Vec3 *)malloc(sizeof(Vec3) * size);
-  if(f->p == NULL || f->hv == NULL || f->v == NULL ) {
+  if(f->p == nullptr || f->hv == nullptr || f->v == nullptr ) {
     printf("Error allocating memory for fluid\n");
     exit(1);
   }
@@ -82,7 +85,7 @@ void malloc_fluid(fluid_t *f, size_t size) {
 
 //Free all dynamically allocated storage for a fluid
 void free_fluid(fluid_t *f) {
-  assert(f!=NULL);
+  assert(f!=nullptr);
   free(f->p);
   free(f->hv);
   free(f->v);
@@ -276,9 +279,9 @@ bool parse_args(conf_t *conf, int argc, char *argv[]) {
   int i;
 
   //Initialize configuration
-  assert(conf!=NULL);
-  conf->file = NULL;
-  conf->rfile = NULL;
+  assert(conf!=nullptr);
+  conf->file = nullptr;
+  conf->rfile = nullptr;
   conf->output.verbose = false;
   conf->output.max = DEFAULT_MAX_MISMATCH_PRINT;
   conf->ptest.doTest = false;

@@ -401,7 +401,7 @@ struct Cell {
   //padding to force cell size to a multiple of estimated cache line size
 //#pragma warning( disable : 1684) // warning #1684: conversion from pointer to same-sized integral type (potential portability problem)
   char padding[CACHELINE_SIZE - (offsetof(struct Cell_aux, padding) % CACHELINE_SIZE)];
-  Cell() { next = NULL; }
+  Cell() { next = nullptr; }
 };
 
 ////////////////////////////////////////////////////////////////////////////////

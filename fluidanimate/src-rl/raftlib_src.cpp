@@ -28,9 +28,12 @@
 
 #include <iostream>
 #include <fstream>
-#include <math.h>
-#include <assert.h>
-#include <float.h>
+//#include <math.h>
+#include <cmath>
+//#include <assert.h>
+#include <cassert>
+//#include <float.h>
+#include <cfloat>
 
 #include "fluid.hpp"
 #include "cellpool.hpp"
@@ -59,7 +62,7 @@ Cell *cells = 0;
 Cell *cells2 = 0;
 int *cnumPars = 0;
 int *cnumPars2 = 0;
-Cell **last_cells = NULL; //helper array with pointers to last cell structure of "cells" array lists
+Cell **last_cells = nullptr; //helper array with pointers to last cell structure of "cells" array lists
 #ifdef ENABLE_VISUALIZATION
 Vec3 vMax(0.0,0.0,0.0);
 Vec3 vMin(0.0,0.0,0.0);
@@ -79,10 +82,10 @@ bool  *border;
 pthread_mutex_t **mutex;
 #endif
 
-typedef struct __thread_args {
+struct thread_args {
   int tid;      //thread id, determines work partition
   int frames;      //number of frames to compute
-} thread_args;      //arguments for threads
+};      //arguments for threads
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -264,7 +267,7 @@ void InitSim(char const *fileName, unsigned int threadnum)
     int n = (border[i] ? MUTEXES_PER_CELL : CELL_MUTEX_ID+1);
     mutex[i] = new pthread_mutex_t[n];
     for (int j = 0; j < n; ++j)
-      pthread_mutex_init(&mutex[i][j], NULL);
+      pthread_mutex_init(&mutex[i][j], nullptr);
   }
 
   #endif
@@ -612,7 +615,7 @@ void ClearParticlesMT(int tid)
       {
         int index = (iz*ny + iy)*nx + ix;
         cnumPars[index] = 0;
-		    cells[index].next = NULL;
+		    cells[index].next = nullptr;
         last_cells[index] = &cells[index];
       }
 }
@@ -752,7 +755,7 @@ raft::kstatus RebuildGridMTWorker::run()
           }
         } // for(int j = 0; j < np2; ++j)
         //return cells to pool that are not statically allocated head of lists
-        if((cell2 != NULL) && (cell2 != &cells2[index2]))
+        if((cell2 != nullptr) && (cell2 != &cells2[index2]))
           cellpool_returncell(&pools[tid], cell2);
       }
     }

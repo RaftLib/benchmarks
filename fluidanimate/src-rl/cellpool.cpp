@@ -7,8 +7,10 @@
 
 #include <iostream>
 
-#include <stdlib.h>
-#include <assert.h>
+//#include <stdlib.h>
+#include <cstdlib>
+//#include <assert.h>
+#include <cassert>
 
 #include "fluid.hpp"
 #include "cellpool.hpp"
@@ -38,7 +40,7 @@
 //The cells inside the block will be connected to a NULL-terminated linked list
 //with the cell at the lowest memory location being the first of its elements.
 static struct datablockhdr *cellpool_allocblock(int cells) {
-  struct datablockhdr *block = NULL;
+  struct datablockhdr *block = nullptr;
   struct Cell *temp1, *temp2;
   int i;
 
@@ -55,7 +57,7 @@ static struct datablockhdr *cellpool_allocblock(int cells) {
 #endif
 
   //initialize header and cells
-  block->next = NULL;
+  block->next = nullptr;
   temp1 = (struct Cell *)(block+1);
   for(i=0; i<cells; i++) {
     //If all structures are correctly padded then all pointers should also be correctly aligned,
@@ -67,7 +69,7 @@ static struct datablockhdr *cellpool_allocblock(int cells) {
       temp1 = temp2;
     } else {
       //last Cell structure in block
-      temp1->next = NULL;
+      temp1->next = nullptr;
     }
   }
 
@@ -81,7 +83,7 @@ void cellpool_init(cellpool *pool, int particles) {
   (void) timeStep;
   int ALLOC_MIN_CELLS = 1024;
   assert(sizeof(struct datablockhdr) % CACHELINE_SIZE == 0);
-  assert(pool != NULL);
+  assert(pool != nullptr);
   assert(particles > 0);
 
   //Allocate the initial data, let's start with 4 times more cells than
@@ -96,10 +98,10 @@ void cellpool_init(cellpool *pool, int particles) {
 Cell *cellpool_getcell(cellpool *pool) {
   struct Cell *temp;
 
-  assert(pool != NULL);
+  assert(pool != nullptr);
 
   //If no more cells available then allocate more
-  if(pool->cells == NULL) {
+  if(pool->cells == nullptr) {
     //keep doubling the number of cells
     struct datablockhdr *block = cellpool_allocblock(pool->alloc);
     pool->alloc = 2 * pool->alloc;
@@ -111,26 +113,26 @@ Cell *cellpool_getcell(cellpool *pool) {
   //return first cell in list
   temp = pool->cells;
   pool->cells = temp->next;
-  temp->next = NULL;
+  temp->next = nullptr;
   return temp;
 }
 
 //Return a Cell structure to the memory pool
 void cellpool_returncell(cellpool *pool, Cell *cell) {
-  assert(pool != NULL);
-  assert(cell != NULL);
+  assert(pool != nullptr);
+  assert(cell != nullptr);
   cell->next = pool->cells;
   pool->cells = cell;
 }
 
 //Destroy the memory pool
 void cellpool_destroy(cellpool *pool) {
-  assert(pool != NULL);
+  assert(pool != nullptr);
 
   //iterate through data blocks and free them all, this will also free all cells
   struct datablockhdr *ptr = pool->datablocks;
   struct datablockhdr *temp;
-  while(ptr != NULL) {
+  while(ptr != nullptr) {
     temp = ptr;
     ptr = ptr->next;
 #if defined(WIN32)
@@ -153,7 +155,7 @@ Cell *cellpool_getcell(cellpool *pool) {
   Cell *cell;
 
   cell = (struct Cell *)malloc(sizeof(struct Cell));
-  assert(cell != NULL);
+  assert(cell != nullptr);
   return cell;
 }
 
@@ -251,7 +253,7 @@ int main() {
   cellpool *pool;
   int i;
 
-  printf("Initializing...\n");fflush(NULL);
+  printf("Initializing...\n");fflush(nullptr);
 
    //init with low number of particles to cause lots of work
   cellpool_init(&pool, 1);
@@ -259,10 +261,10 @@ int main() {
   //initialize statically allocated cells
   for(i=0; i<size_array; i++) {
     write_cell(&(cells[i]));
-    cells[i].next = NULL;
+    cells[i].next = nullptr;
   }
 
-  printf("Testing (1st pass): ");fflush(NULL);
+  printf("Testing (1st pass): ");fflush(nullptr);
 
   //allocate all cells and initialize them with predetermined values
   for(i=0; i<nCells; i++) {
@@ -272,20 +274,20 @@ int main() {
     temp = cellpool_getcell(pool);
     write_cell(temp);
     ptr = &(cells[i % size_array]);
-    while(ptr->next != NULL) {
+    while(ptr->next != nullptr) {
       ptr = ptr->next;
     }
     ptr->next = temp;
 
     //print a progress message every 1/10th of the work
     if((i+1) % (nCells/10) == 0) {
-      printf("...%i%%", (i+1) / (nCells/100));fflush(NULL);
+      printf("...%i%%", (i+1) / (nCells/100));fflush(nullptr);
     }
   }
-  printf("\n");fflush(NULL);
+  printf("\n");fflush(nullptr);
 
   //now make a 2nd pass and check that all values are still correct
-  printf("Testing (2nd pass): ");fflush(NULL);
+  printf("Testing (2nd pass): ");fflush(nullptr);
   int count = 0;
   for(i=0; i<size_array; i++) {
     struct Cell *ptr;
@@ -300,18 +302,18 @@ int main() {
       count++;
       //print a progress message every 1/10th of the work
       if((count+1) % (nCells/10) == 0) {
-        printf("...%i%%", (count+1) / (nCells/100));fflush(NULL);
+        printf("...%i%%", (count+1) / (nCells/100));fflush(nullptr);
       }
 
       ptr = ptr->next;
-    } while(ptr != NULL);
+    } while(ptr != nullptr);
   }
-  printf("\n");fflush(NULL);
+  printf("\n");fflush(nullptr);
 
   //cleanup & shutdown
-  printf("Cleanup...\n");fflush(NULL);
+  printf("Cleanup...\n");fflush(nullptr);
   cellpool_destroy(&pool);
-  printf("Terminating...\n");fflush(NULL);
+  printf("Terminating...\n");fflush(nullptr);
   return 0;
 }
 #endif //ENABLE_TESTER
