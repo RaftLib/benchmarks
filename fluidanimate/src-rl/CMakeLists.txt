@@ -3,6 +3,11 @@ CMAKE_MINIMUM_REQUIRED (VERSION 3.10 FATAL_ERROR)
 
 SET(MULTI_TESTS 0 CACHE BOOL "If set, builds the multi-threaded tests.")
 SET(NATIVE_TESTS 0 CACHE BOOL "If set, builds the native input set tests.")
+SET(USE_LOCK 1 CACHE BOOL "If set, builds fluidanimate using a mutex lock instead of a circular dependence.")
+
+IF(USE_LOCK)
+    ADD_DEFINITIONS(-DUSE_MUTEX)
+ENDIF()
 
 PROJECT(fluidanimate CXX)
 
