@@ -1,3 +1,5 @@
+#include <cstring>
+#include <cstdlib>
 #include "raftlib_src.hpp"
 #include "fluidcmp.hpp"
 
@@ -13,7 +15,9 @@ int main()
     int result = fluidcmp(3, argv2);
 
     if (result != 0)
-        return EXIT_FAILURE;
+    {
+        return( EXIT_FAILURE );
+    }
     
-    return EXIT_SUCCESS;
+    return( EXIT_SUCCESS );
 }
