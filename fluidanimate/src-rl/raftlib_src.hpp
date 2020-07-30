@@ -195,7 +195,6 @@ class CellModificationKernel : public raft::kernel
 private:
   int m_ThreadCount;
   bool* m_Done;
-  int count;
 public:
   CellModificationKernel(int threadCount);
   ~CellModificationKernel();

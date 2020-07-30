@@ -503,7 +503,6 @@ SimpleAccumulatorKernel::SimpleAccumulatorKernel(int threadCount)
 
 raft::kstatus SimpleAccumulatorKernel::run()
 {
-  std::cout << "In simple accumulator kernel" << std::endl;
   // Pass through the TIDs
   for (auto i = 0; i < m_ThreadCount; i++)
   {
@@ -656,15 +655,11 @@ RebuildGridMTWorker::RebuildGridMTWorker()
   // Create the output port (tid)
   output.addPort<int>("output");
 
-  // Create an output port for modifying cell values in a thread-safe way
-  //output.addPort<CellModificationInfo>("output_cell");
 }
 
 raft::kstatus RebuildGridMTWorker::run()
 {
   int tid = input["input"].peek<int>();
-
-  int count = 0;
 
   //iterate through source cell lists
   for(int iz = grids[tid].ind.sz; iz < grids[tid].ind.ez; ++iz)
@@ -677,7 +672,6 @@ raft::kstatus RebuildGridMTWorker::run()
         Cell *cell2 = &cells2[index2];
         int np2 = cnumPars2[index2];
         //iterate through source particles
-        //std::cout << "NP2: " << np2 << std::endl;
 
         for(int j = 0; j < np2; ++j)
         {
@@ -736,7 +730,6 @@ raft::kstatus RebuildGridMTWorker::run()
           }
 
           ++cnumPars[index];
-          ++count;
 
           if (border[index])
             pthread_mutex_unlock(&mutex[index][CELL_MUTEX_ID]);
@@ -749,7 +742,6 @@ raft::kstatus RebuildGridMTWorker::run()
 
           //move pointer to next source cell in list if end of array is reached
           if(j % PARTICLES_PER_CELL == PARTICLES_PER_CELL-1) {
-            std::cout << "Performing the operation" << std::endl;
             Cell *temp = cell2;
             cell2 = cell2->next;
             //return cells to pool that are not statically allocated head of lists
@@ -763,13 +755,8 @@ raft::kstatus RebuildGridMTWorker::run()
         if((cell2 != NULL) && (cell2 != &cells2[index2]))
           cellpool_returncell(&pools[tid], cell2);
       }
-      //std::cout << "Incremented " << count << " times this iteration" << std::endl;
-      //count = 0;
     }
   }
-  std::cout << "Count: " << count << std::endl;
-  // Tell the cell mod kernel that we're done with our work
-  //output["output_cell"].push<CellModificationInfo>(CellModificationInfo(nullptr, -1, -1, SynchronizeKernelData(tid, true)));
   
   // Push our output and cleanup
   output["output"].push<int>(tid);
@@ -949,8 +936,6 @@ CellModificationKernel::CellModificationKernel(int threadCount)
 
   for (auto i = 0; i < m_ThreadCount; i++)
     m_Done[i] = 0;
-
-  count = 0;
 }
 
 CellModificationKernel::~CellModificationKernel()
@@ -995,7 +980,6 @@ raft::kstatus CellModificationKernel::run()
         last_cells[inputData.index] = cell;
       }
       ++cnumPars[inputData.index];
-      ++count;
 
       //copy source to destination particle
           
@@ -1015,8 +999,6 @@ raft::kstatus CellModificationKernel::run()
 
   if (done)
   {
-    std::cout << "CellModificationKernel is done" << std::endl;
-    std::cout << "cnumPars incremented " << count << " times" << std::endl;
     return raft::stop;
   }
   return raft::proceed;
@@ -1039,7 +1021,6 @@ raft::kstatus RebuildGridMTWorker2::run()
 
   //move pointer to next source cell in list if end of array is reached
   if(inputData.j % PARTICLES_PER_CELL == PARTICLES_PER_CELL-1) {
-    std::cout << "Performing the operation" << std::endl;
     Cell *temp = inputData.cell2;
     inputData.cell2 = inputData.cell2->next;
     //return cells to pool that are not statically allocated head of lists
@@ -1092,7 +1073,6 @@ int InitNeighCellList(int ci, int cj, int ck, int *neighCells)
 
 void InitDensitiesAndForcesMT(int tid)
 {
-  std::cout << "In InitDensitiesAndForcesMT" << std::endl;
   for(int iz = grids[tid].ind.sz; iz < grids[tid].ind.ez; ++iz)
     for(int iy = grids[tid].ind.sy; iy < grids[tid].ind.ey; ++iy)
       for(int ix = grids[tid].ind.sx; ix < grids[tid].ind.ex; ++ix)
@@ -1154,7 +1134,6 @@ ComputeDensitiesMTWorker::ComputeDensitiesMTWorker()
 
 raft::kstatus ComputeDensitiesMTWorker::run()
 {
-  std::cout << "In computeDensitiesMTWorker" << std::endl;
   int tid = input["input"].peek<int>();
 
   int neighCells[3*3*3];
@@ -1279,10 +1258,7 @@ raft::kstatus DensityModificationKernel::run()
       done = false;
 
   if (done)
-  {
-    std::cout << "DensityModificationKernel done" << std::endl;
     output["output"].push<int>(true);
-  }
 
 
   return raft::proceed;
@@ -1292,7 +1268,6 @@ raft::kstatus DensityModificationKernel::run()
 
 void ComputeDensities2MT(int tid)
 {
-  std::cout << "In computeDensities2MT" << std::endl;
   const fptype tc = hSq*hSq*hSq;
   for(int iz = grids[tid].ind.sz; iz < grids[tid].ind.ez; ++iz)
     for(int iy = grids[tid].ind.sy; iy < grids[tid].ind.ey; ++iy)
@@ -1766,7 +1741,6 @@ raft::kstatus ProcessCollisions2MTWorker::run()
 
 void AdvanceParticlesMT(int tid)
 {
-  std::cout << "In advanceParticlesMT" << std::endl;
   for(int iz = grids[tid].ind.sz; iz < grids[tid].ind.ez; ++iz)
     for(int iy = grids[tid].ind.sy; iy < grids[tid].ind.ey; ++iy)
       for(int ix = grids[tid].ind.sx; ix < grids[tid].ind.ex; ++ix)
@@ -1829,7 +1803,6 @@ raft::kstatus AdvanceParticlesMTWorker::run()
 
 void AdvanceFrameMT(int threadnum)
 {
-  std::cout << "Advancing frame" << std::endl;
   std::swap(cells, cells2);
   std::swap(cnumPars, cnumPars2);
 
