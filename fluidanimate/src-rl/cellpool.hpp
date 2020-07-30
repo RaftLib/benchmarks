@@ -26,14 +26,14 @@ struct datablockhdr {
 //list of data blocks. The data blocks preserve the original block structure as returned
 //by malloc, the cell list breaks the blocks down into smaller cell structures which can
 //be used by the program as needed.
-typedef struct {
+struct cellpool {
   //linked list of available cells
   struct Cell *cells;
   //number of cells allocated so far (NOT number of cells currently available in pool)
   int alloc;
   //linked list of allocated data blocks (required for free operation)
   struct datablockhdr *datablocks;
-} cellpool;
+};
 
 
 
