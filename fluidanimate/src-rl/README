@@ -1,0 +1,9 @@
+RaftLib Fluidanimate Implementation
+====================================
+
+To build with tests, do the following:
+
+1. Make a new directory (i.e. `mkdir build`) within any folder you would like. This is easier if you do it within the src-rl directory.
+2. Enter that directory (`cd build`)
+3. Run `cmake` from within the directory targeting the src-rl directory (optionally add flag -DMULTI_TESTS for multi-threaded test versions and/or -DNATIVE_TESTS for native data input tests). Consider adding flag -DUSE_LOCK (default true) to enable/disable the use of locks in the application.
+4. Run `make && make test`

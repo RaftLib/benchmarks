@@ -1,0 +1,21 @@
+#include <cstring>
+#include <cstdlib>
+#include "raftlib_src.hpp"
+#include "fluidcmp.hpp"
+
+// This test uses the "simlarge" runconfig
+// This is equivalent to calling ./fluidanimate 4 5 in_300K.fluid output_simlarge.fluid
+int main()
+{
+    (void) timeStep;
+    char* argv[] = {strdup("./fluidanimate"), strdup("4"), strdup("5"), strdup("@IN_300K@"), strdup("output_simlarge.fluid")};
+    fluidanimate(5, argv);
+
+    char* argv2[] = {strdup("./fluidcmp"), strdup("output_simlarge.fluid"), strdup("@EXPECTED_SIMLARGE@")};
+    int result = fluidcmp(3, argv2);
+
+    if (result != 0)
+        return EXIT_FAILURE;
+    
+    return EXIT_SUCCESS;
+}
