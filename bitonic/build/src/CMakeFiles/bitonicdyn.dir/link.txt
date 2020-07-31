@@ -1,0 +1,2 @@
+/usr/bin/ar qc libbitonicdyn.a  CMakeFiles/bitonicdyn.dir/bitonic_seq.cpp.o
+/usr/bin/ranlib libbitonicdyn.a

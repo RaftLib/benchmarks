@@ -1,0 +1,18 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/jonathan/GIT_RPO/benchmarks/bitonic/src/bitonic_seq.cpp
+cstdio
+-
+cstdlib
+-
+cstdint
+-
+cinttypes
+-
+
