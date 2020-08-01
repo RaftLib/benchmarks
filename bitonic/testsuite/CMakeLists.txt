@@ -18,10 +18,7 @@ configure_file ( "test_sequential_hundred_shell.cpp" "test_sequential_hundred.cp
 ADD_EXECUTABLE( test_sequential_hundred_exe  test_sequential_hundred.cpp )
 TARGET_LINK_LIBRARIES( test_sequential_hundred_exe PUBLIC bitonicdyn)
 ADD_TEST(test_sequential_hundred test_sequential_hundred_exe)
-#
-#IF (MULTI_TESTS)
-#ADD_EXECUTABLE(test_test_multi_exe test_test_multi.cpp)
-#TARGET_LINK_LIBRARIES(test_test_multi_exe PUBLIC streamcluster_static)
-#ADD_TEST(test_test_multi test_test_multi_exe)
-#ENDIF ()
 
+ADD_EXECUTABLE( test_swap_exe  test_swap.cpp )
+TARGET_LINK_LIBRARIES( test_swap_exe PUBLIC bitonicdyn )
+ADD_TEST(test_swap test_swap_exe)

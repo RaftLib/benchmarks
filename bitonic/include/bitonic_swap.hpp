@@ -20,17 +20,16 @@
 #ifndef BITONIC_SWAP_HPP
 #define BITONIC_SWAP_HPP  1
 
-#include <cstdint>
-#include "defs.hpp"
+#include <utility>
 
-template < class T > bitonic
+namespace bitonic
 {
 
-void swap( T *a, T *b )
+template < class T > constexpr static void swap( T &a, T &b ) noexcept
 {
-    std::swap( *a, *b );
+    std::swap( a, b );
     return;
 }
 
-};
+} /** end namespace bitonic **/
 #endif /* END BITONIC_SWAP_HPP */

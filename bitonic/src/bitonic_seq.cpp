@@ -4,50 +4,50 @@
  */
 #include <cstdio>
 #include <cstdlib>
-#include <cstdint>
-#include <cinttypes>
+#include <cmath>
 #include "bitonic_seq.hpp"
-
+#include "bitonic_swap.hpp"
 
 void 
-bitonic::sequential::merge_up( bitonic::type_t *arr, const bitonic::type_t n ) 
+bitonic::sequential::merge_up( bitonic::type_t * const arr, const bitonic::type_t n )  noexcept
 {
-  bitonic::type_t step( n/2) , i(0), j(0), k(0), temp(0);
+  bitonic::type_t step( n >> 1 );
   while (step > 0) 
   {
-    for( i=0; i < n; i+=step*2 ) 
+    for( auto i( 0 ); i < n; i+= (step << 1) ) 
     {
-      for( j=i,k=0;k < step;j++, k++ ) 
+      for( auto j( i ), k( 0 ); k < step; j++, k++ ) 
       {
-        if( arr[j] > arr[j+step]) 
+        if( std::isgreater( arr[ j ], arr[ j+step ] ) ) 
         {
             // swap
-            temp        =   arr[j];
-            arr[j]      =   arr[j+step];
-            arr[j+step] =   temp;
+            bitonic::swap( arr[ j ], arr[j + step] );
         }
       }
     }
-    step /= 2;
+    step = (step >> 1);
   }
 }
 
 void 
-bitonic::sequential::merge_down( bitonic::type_t *arr, const bitonic::type_t  n) 
+bitonic::sequential::merge_down( bitonic::type_t * const arr, const bitonic::type_t  n) noexcept
 {
-    bitonic::type_t step=n/2,i,j,k,temp( 0 );
-    while (step > 0) {
-      for (i=0; i < n; i+=step*2) {
-        for (j=i,k=0;k < step;j++,k++) {
-      if (arr[j] < arr[j+step]) {
-        // swap
-        temp = arr[j];
-        arr[j]=arr[j+step];
-        arr[j+step]=temp;
-      }
+    bitonic::type_t step( n >> 1 );
+
+    while( step > 0 ) 
+    {
+        for( auto i( 0 ); i < n; i += (step << 1 ) ) 
+        {
+            for( auto j( i ), k( 0 ); k < step; j++,k++) 
+            {
+                if( std::isless( arr[ j ], arr[ j+step ] ) ) 
+                {
+                    // swap
+                    bitonic::swap( arr[ j ], arr[ j + step ] );
+                }
+            }
         }
-      }
-      step /= 2;
+        step = (step >> 1 );
     }
 }
 

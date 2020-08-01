@@ -1,7 +1,7 @@
 /**
- * bitonic_seq.hpp - 
+ * test_swap.cpp - 
  * @author: Jonathan Beard
- * @version: Fri Jul 31 12:21:11 2020
+ * @version: Sat Aug  1 15:39:35 2020
  * 
  * Copyright 2020 Jonathan Beard
  * 
@@ -17,26 +17,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef BITONIC_SEQ_HPP
-#define BITONIC_SEQ_HPP  1
 
-#include "defs.hpp"
+#include <iostream>
+#include "bitonic_swap.hpp"
 
-namespace bitonic
+
+int main()
 {
 
+    int a = 97;
+    int b = 98;
 
-struct sequential
-{
-
-static void merge_up(   bitonic::type_t * const arr, 
-                        const bitonic::type_t n ) noexcept;
-
-static void merge_down( bitonic::type_t * const arr, 
-                        const bitonic::type_t n ) noexcept;
-
-};
-
-} /** end namespace bitonic **/
-
-#endif /* END BITONIC_SEQ_HPP */
+    bitonic::swap( a, b );
+    std::cout << "a is now: " << (char)a << "\n";
+    std::cout << "b is now: " << (char)b << "\n";
+    if( (char)a == 'b' && (char)b == 'a' )
+    {
+        return( EXIT_SUCCESS );
+    }
+    return( EXIT_FAILURE );
+}
