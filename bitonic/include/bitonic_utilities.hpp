@@ -27,7 +27,8 @@ namespace bitonic
 struct utilities
 {
 
-static void printArray( bitonic::type_t *arr, const std::size_t n) 
+static void printArray( bitonic::type_t *arr, const std::size_t n);
+
 };
 
 } /** end namespace bitonic **/

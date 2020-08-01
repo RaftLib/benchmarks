@@ -20,6 +20,8 @@
 #ifndef BITONIC_SEQ_HPP
 #define BITONIC_SEQ_HPP  1
 
+#include "defs.hpp"
+
 namespace bitonic
 {
 
@@ -27,11 +29,11 @@ namespace bitonic
 struct sequential
 {
 
-static void merge_up( bitonic::type_t *arr, const bitonic::type_t n );
+static void merge_up(   bitonic::type_t *arr, 
+                        const bitonic::type_t n );
 
-static void merge_down( type_t *arr, const bitonic::type_t n );
-
-    
+static void merge_down( type_t *arr, 
+                        const bitonic::type_t n );
 
 };
 

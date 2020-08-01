@@ -19,40 +19,43 @@
  */
 
 #include <cstdlib>
+#include <cstdio>
 #include <cstdint>
+#include "defs.hpp"
 #include "bitonic_seq.hpp"
+#include "bitonic_utilities.hpp"
 
 int main(int argc, char **argv) 
 {
-  bitonic::type_t n( 0 ), *arr( nullptr ), i( 0 ), s( 0 );
+    (void)(argc); 
+    bitonic::type_t n( 0 ), *arr( nullptr ), i( 0 ), s( 0 );
+    FILE *fp = std::fopen( argv[1],"r" );
 
-  FILE *fp = std::fopen( argv[1],"r" );
+    if( fp == nullptr ) 
+    {
+      std::fprintf(stderr,"file not found\n");
+      std::exit( EXIT_FAILURE );
+    }
+    // first line gives number of numbers to be sorted 
+    std::fscanf( fp, "%" PRI_T "", &n );
+    // allocate space and read all the numbers 
+    arr = (bitonic::type_t*) malloc( n * sizeof(bitonic::type_t) );
+    for (i=0; i < n; i++) {
+      fscanf(fp,"%" PRI_T "",(arr+i));
+    }
+    // print array before 
+    bitonic::utilities::printArray( arr, n );
 
-  if( fp == nullptr ) 
-  {
-    std::fprintf(stderr,"file not found\n");
-    std::exit( EXIT_FAILURE );
-  }
-  // first line gives number of numbers to be sorted 
-  std::fscanf( fp, "%" PRI_T "", &n );
-  // allocate space and read all the numbers 
-  arr = (bitonic::type_t*) malloc( n * sizeof(bitonic::type_t) );
-  for (i=0; i < n; i++) {
-    fscanf(fp,"%" PRI_T "",(arr+i));
-  }
-  // print array before 
-  bitonic::sequential::printArray( arr, n );
-
-  // do merges
+    // do merges
     for (s=2; s <= n; s*=2) 
     {
         for (i=0; i < n;) 
         {
-            merge_up((arr+i),s);
-            merge_down((arr+i+s),s);
+            bitonic::sequential::merge_up((     arr+i),     s);
+            bitonic::sequential::merge_down((   arr+i+s),   s);
             i += s*2;
         }
     }
 
-    bitonic::sequential::printArray(arr,n);
+    bitonic::utilities::printArray(arr,n);
 }

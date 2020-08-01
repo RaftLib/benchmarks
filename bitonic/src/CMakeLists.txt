@@ -1,7 +1,8 @@
 set( CMAKE_INCLUDE_CURRENT_DIR ON )
 
 
-add_library( bitonicdyn bitonic_seq.cpp )
+add_library( bitonicdyn bitonic_seq.cpp 
+                        bitonic_utilities.cpp )
 
 target_link_libraries( bitonicdyn PUBLIC PkgConfig::RAFTLIB )
 

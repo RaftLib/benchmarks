@@ -1,5 +1,11 @@
 /**
- * bitonic_utilities.cpp - 
+ * bitonic_utilities.cpp - just things that'll 
+ * be used by all the various versions of the 
+ * bitonic sort benchmark. If possible these will 
+ * all be relatively generic, meaning that many
+ * will just be templates, non-template stuff
+ * of course goes here. 
+ * 
  * @author: Jonathan Beard
  * @version: Fri Jul 31 12:36:24 2020
  * 
@@ -17,16 +23,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <cstdio>
 #include "defs.hpp"
 #include "bitonic_utilities.hpp"
 
 void 
 bitonic::utilities::printArray( bitonic::type_t *arr, const std::size_t  n) 
 {
-    printf("[%" PRI_T "",arr[0]);
-    for( auto i( 1 ); i < n; i++)
+    std::printf("[%" PRI_T "",arr[0]);
+    for( std::size_t i( 1 ); i < n; i++)
     {
-        printf(",%" PRI_T "",arr[i]);
+        std::printf(",%" PRI_T "",arr[i]);
     }
-    printf("]\n");
+    std::printf("]\n");
 }

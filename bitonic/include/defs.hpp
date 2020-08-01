@@ -19,11 +19,17 @@
  */
 #ifndef DEFS_HPP
 #define DEFS_HPP  1
+
+#include <cinttypes>
+#include <cstdint>
+
+#define PRI_T PRIi64
+
 namespace bitonic
 {
 
-using   type_t = std::int64_t;
-#define PRI_T PRIi64
+    using   type_t = std::int64_t;
 
 } /** end namespace bitonic **/
+
 #endif /* END DEFS_HPP */
