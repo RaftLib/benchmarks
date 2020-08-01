@@ -21,39 +21,77 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstdint>
+#include <cmd>
+
 #include "defs.hpp"
 #include "bitonic_seq.hpp"
 #include "bitonic_utilities.hpp"
 
 int main(int argc, char **argv) 
 {
-    (void)(argc); 
-    bitonic::type_t n( 0 ), *arr( nullptr ), i( 0 ), s( 0 );
-    FILE *fp = std::fopen( argv[1],"r" );
+    CmdArgs  cmd( argv[ 0 ],
+                  std::cout,
+                  std::cerr );
 
+    bool help( false );
+    cmd.addOption( new Option< bool >( help,
+                                       "-h",
+                                       "Print this message",
+                                       false ) );
+
+
+    std::string filename( "none" );
+    cmd.addOption( new Option< std::string >( filename,
+                                              "-f",
+                                              "Set the input file name",
+                                              true /** make this arg mandatory **/ ) );
+
+    
+    /** give object command line **/
+    cmd.processArgs( argc, argv );
+    
+    /** handle the user needing help **/
+    if( help )
+    {
+       cmd.printArgs();
+       exit( EXIT_SUCCESS );
+    }
+    /** 
+     * to check and see if all mandatory args are set, add this code
+     * which will print all mandatory args that are missing.
+     */
+    if( ! cmd.allMandatorySet() )
+    { 
+       exit( EXIT_FAILURE );
+    }
+    
+
+    FILE *fp = std::fopen( filename.c_str(), "r" );
     if( fp == nullptr ) 
     {
       std::fprintf(stderr,"file not found\n");
       std::exit( EXIT_FAILURE );
     }
+    bitonic::type_t n( 0 );
     // first line gives number of numbers to be sorted 
     std::fscanf( fp, "%" PRI_T "", &n );
     // allocate space and read all the numbers 
-    arr = (bitonic::type_t*) malloc( n * sizeof(bitonic::type_t) );
-    for (i=0; i < n; i++) {
-      fscanf(fp,"%" PRI_T "",(arr+i));
+    auto *arr = (bitonic::type_t*) malloc( n * sizeof(bitonic::type_t) );
+    for( auto i( 0 ); i < n; i++) 
+    {
+        std::fscanf( fp,"%" PRI_T "", &arr[ i ] );
     }
     // print array before 
+
     bitonic::utilities::printArray( arr, n );
 
     // do merges
-    for (s=2; s <= n; s*=2) 
+    for( auto s( 2 ); s <= n; s*=2 ) 
     {
-        for (i=0; i < n;) 
+        for( auto i( 0 ); i < n; i += s*2 ) 
         {
             bitonic::sequential::merge_up((     arr+i),     s);
             bitonic::sequential::merge_down((   arr+i+s),   s);
-            i += s*2;
         }
     }
 
