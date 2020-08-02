@@ -1,5 +1,5 @@
-#include<stdio.h>
-#include<stdlib.h>
+#include    <cstdio>
+#include    <cstdlib>
 
 #define MAX(A, B) (((A) > (B)) ? (A) : (B))
 #define MIN(A, B) (((A) > (B)) ? (B) : (A))
@@ -8,8 +8,9 @@
 
 double walltime(double*); /* the clock on the wall */
 void bitonic_sort_seq(int start, int length, int *seq, int flag);
+
 void bitonic_sort_par(int start, int length, int *seq, int flag);
-void swap(int *a, int *b);
+
 
 int m;
 

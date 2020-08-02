@@ -26,9 +26,14 @@ namespace bitonic
 
 struct utilities
 {
-
-static void printArray( bitonic::type_t *arr, const std::size_t n);
-
+    /**
+     * printArray - simple help function to print the array. 
+     * @param   arr - bitonic::type_t*, array of type_t
+     * @param   n   - length of arr.
+     */
+    static void print_array( bitonic::type_t *arr, const std::size_t n);
+   
+    static std::size_t get_length( FILE *fp );
 };
 
 } /** end namespace bitonic **/

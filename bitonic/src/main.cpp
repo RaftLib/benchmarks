@@ -72,28 +72,27 @@ int main(int argc, char **argv)
       std::fprintf(stderr,"file not found\n");
       std::exit( EXIT_FAILURE );
     }
-    bitonic::type_t n( 0 );
     // first line gives number of numbers to be sorted 
-    std::fscanf( fp, "%" PRI_T "", &n );
+    const auto n( bitonic::utilities::get_length( fp ) );
     // allocate space and read all the numbers 
     auto *arr = (bitonic::type_t*) malloc( n * sizeof(bitonic::type_t) );
-    for( auto i( 0 ); i < n; i++) 
+    for( std::size_t i( 0 ); i < n; i++) 
     {
         std::fscanf( fp,"%" PRI_T "", &arr[ i ] );
     }
     // print array before 
 
-    bitonic::utilities::printArray( arr, n );
+    bitonic::utilities::print_array( arr, n );
 
     // do merges
-    for( auto s( 2 ); s <= n; s*=2 ) 
+    for( std::size_t s( 2 ); s <= n; s*=2 ) 
     {
-        for( auto i( 0 ); i < n; i += s*2 ) 
+        for( std::size_t i( 0 ); i < n; i += s*2 ) 
         {
             bitonic::sequential::merge_up((     arr+i),     s);
             bitonic::sequential::merge_down((   arr+i+s),   s);
         }
     }
 
-    bitonic::utilities::printArray(arr,n);
+    bitonic::utilities::print_array(arr,n);
 }

@@ -28,7 +28,7 @@
 #include "bitonic_utilities.hpp"
 
 void 
-bitonic::utilities::printArray( bitonic::type_t *arr, const std::size_t  n) 
+bitonic::utilities::print_array( bitonic::type_t *arr, const std::size_t  n) 
 {
     std::printf("[%" PRI_T "",arr[0]);
     for( std::size_t i( 1 ); i < n; i++)
@@ -36,4 +36,17 @@ bitonic::utilities::printArray( bitonic::type_t *arr, const std::size_t  n)
         std::printf(",%" PRI_T "",arr[i]);
     }
     std::printf("]\n");
+}
+    
+std::size_t 
+bitonic::utilities::get_length( FILE *fp )
+{
+    std::size_t n;
+    const auto ret_val( std::fscanf( fp, "%" PRIuMAX "", &n ) );
+    if( ret_val != 1 || ret_val == EOF )
+    {
+        //failed
+        return( 0 );
+    }
+    return( n );
 }
