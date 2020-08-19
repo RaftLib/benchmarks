@@ -5,7 +5,8 @@
 #include <cassert>
 #include <iostream>
 #include <type_traits>
-#if 0
+
+#if 1
 #include "util.h"
 #include "debug.h"
 #include "dedupdef.h"
@@ -94,7 +95,7 @@ usage(char* prog)
 int
 main( int argc, char **argv )
 {
-#if 0
+#if 1
 
     int32 compress = TRUE;
 
@@ -194,22 +195,23 @@ main( int argc, char **argv )
     
     std::cout << "Got through selection of options\n";
 
-    /*if (compress) {
+    if (compress) {
         Encode(conf);
     } 
-    else {
+    /*else {
         Decode(conf);
     }*/
 
-    //free(conf);
+    free(conf);
 #endif
-    Prod    producer;
+    
+    /*Prod    producer;
     Kernel  k;
-
     raft::map m;
     m += producer[ "output" ] >> k[ "in" ];
-    m.exe();
-    std::cout << "done executing graph\n";
+    m.exe();*/
+
+    //std::cout << "done executing graph\n";
     return (EXIT_SUCCESS);
 
 }

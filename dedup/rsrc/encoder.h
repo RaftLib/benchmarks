@@ -373,6 +373,8 @@ class Read: public raft::kernel
         chunk_t *chunk;
         size_t preloading_buffer_seek;
         struct thread_args args;
+        u32int * rabintab;
+        u32int * rabinwintab;
 
     public:
         Read(config_t * Conf, int Fdesc, struct thread_args * Args) : raft::kernel()
@@ -387,8 +389,8 @@ class Read: public raft::kernel
 
             temp = NULL;
             chunk = NULL;
-            u32int * rabintab = (u32int *)malloc(256*sizeof rabintab[0]);
-            u32int * rabinwintab = (u32int *)malloc(256*sizeof rabintab[0]);
+            rabintab = (u32int *)malloc(256*sizeof rabintab[0]);
+            rabinwintab = (u32int *)malloc(256*sizeof rabintab[0]);
             if(rabintab == NULL || rabinwintab == NULL) {
               EXIT_TRACE("Memory allocation failed.\n");
             }
@@ -471,10 +473,11 @@ class Read: public raft::kernel
             }
             //No data left over from last iteration and also nothing new read in, simply clean up and quit
             if(bytes_left + bytes_read == 0) {
+              assert(chunk);
               mbuffer_free(&chunk->uncompressed_data);
               free(chunk);
               chunk = NULL;
-              //break;
+              //printf("No data leftover\n");
               return -1;
             }
             //Shrink buffer to actual size
@@ -516,58 +519,12 @@ class Read: public raft::kernel
               }
 #endif
               //stop fetching from input buffer, terminate processing
+              //printf("Stop fetching from input buffer\n");
               return -1;
               //break;
             }
-#endif 
-        return( 0 );
-        }
 
-        virtual raft::kstatus run()
-        {
-            //int status = work();
-            int status = 0;
-            
-            auto c(output["out"].template allocate_s<chunk_t>());
-            assert (chunk);
-            *c = *chunk;
-            output["output"].send();
-
-            if (status == -1)
-                return (raft::stop);
-
-            return(raft::proceed);
-        }
-};
-
-/** Kernel **/
-
-class Write: public raft::kernel
-{
-    private:
-        int elm;
-        chunk_t *temp;
-        u32int * rabintab;
-        u32int * rabinwintab;
-        int fd_out;
-    public:
-        Write(config_t * Conf, int Fdesc, struct thread_args * Args) : raft::kernel()
-        {
-            input.addPort<chunk_t>("in");
-            rabintab = (u32int *)malloc(256*sizeof rabintab[0]);
-            rabinwintab = (u32int *)malloc(256*sizeof rabintab[0]);
-            if(rabintab == NULL || rabinwintab == NULL) {
-              EXIT_TRACE("Memory allocation failed.\n");
-            }
-            rf_win_dataprocess = 0;
-            rabininit(rf_win_dataprocess, rabintab, rabinwintab);
-            fd_out = Fdesc;
-        }
-
-        virtual void work(chunk_t * chunk){
-        
-            //partition input block into fine-granular chunks
-            int split, r;
+            int split;
             do {
               split = 0;
               //Try to split the buffer
@@ -612,7 +569,11 @@ class Write: public raft::kernel
 #endif //ENABLE_STATISTICS
                 }
 
-                write_chunk_to_file(fd_out, chunk);
+                //write_chunk_to_file(fd_out, chunk);
+                assert(chunk);
+                chunk_t test = *chunk;
+                output[ "out" ].push(test);
+                
                 if(chunk->header.isDuplicate){
                   free(chunk);
                   chunk=NULL;
@@ -630,21 +591,73 @@ class Write: public raft::kernel
                 split = 0;
               }
             } while(split);
+
+
+#endif 
+        return( 0 );
+        }
+
+        virtual raft::kstatus run()
+        {
+            int status = work();
+            //int status = 0;
+           
+            //printf("Read status: %d\n", status);
+            
+            if (status == -1){
+                //chunk_t test;
+                //output[ "out" ].push(test);
+                return (raft::stop);
+            }
+            
+            //assert(chunk);
+            
+            /*auto c(output["out"].template allocate_s<chunk_t>());
+            assert(chunk);
+            *c = *chunk;
+            output["out"].send();*/
+
+            return(raft::proceed);
+        }
+};
+
+/** Kernel **/
+
+class Write: public raft::kernel
+{
+    private:
+        int elm;
+        chunk_t *temp;
+        int fd_out;
+    public:
+        Write(config_t * Conf, int Fdesc, struct thread_args * Args) : raft::kernel()
+        {
+            input.addPort<chunk_t>("in");
+            fd_out = Fdesc;
+        }
+
+        virtual void work(chunk_t * chunk){
+            //printf("chunk %d\n", *chunk);
+            write_chunk_to_file(fd_out, chunk);
         }
 
 
         virtual raft::kstatus run()
         {
-            auto &in((this)->input["in"]);
-            auto &elm(in.template peek<chunk_t>());
+            //auto &in((this)->input["in"]);
+            //auto &elm(in.template peek<chunk_t>());
+           
+            chunk_t elm; 
+            input[ "in" ].pop( elm );
+
             //assert (elm);
             //printf ("Elm: %d\n", elm);
             
-            if(&elm == NULL)
-               return (raft::stop); 
+            //if(&elm == NULL)
+            //   return (raft::stop); 
 
             work(&elm);
-            in.recycle(1);
+            //in.recycle(1);
             return(raft::proceed);
         }
 };
@@ -661,9 +674,9 @@ void RaftPipeline(void * targs){
   Write Consumer(conf, fd_out, args);
     
   raft::map m;
-  m += Producer >> Consumer;
+  m += Producer["out"] >> Consumer["in"];
   m.exe();
-
+  
 }
 
 void *SerialIntegratedPipeline(void * targs) {
@@ -958,7 +971,8 @@ void Encode(config_t * _conf) {
   generic_args.nqueues = -1;
   generic_args.fd = fd;
 
-  SerialIntegratedPipeline(&generic_args);
+  //SerialIntegratedPipeline(&generic_args);
+  RaftPipeline(&generic_args);
   
   //clean up after preloading
   if(conf->preloading) {
@@ -972,6 +986,16 @@ void Encode(config_t * _conf) {
   assert(!mbuffer_system_destroy());
 
   hashtable_destroy(cache, TRUE);
+
+#ifdef ENABLE_STATISTICS
+  /* dest file stat */
+  if (stat(conf->outfile, &filestat) < 0) 
+      EXIT_TRACE("stat() %s failed: %s\n", conf->outfile, strerror(errno));
+  stats.total_output = filestat.st_size;
+
+  //Analyze and print statistics
+  if(conf->verbose) print_stats(&stats);
+#endif //ENABLE_STATISTICS
 
 }
 

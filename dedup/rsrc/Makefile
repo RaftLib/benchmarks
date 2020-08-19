@@ -2,7 +2,7 @@ include ../../parseclibs/Makefile.parsec
 NTHREADS = 1
 
 CXX:=g++
-CXXFLAGS = -O0 -g -static -Wno-pointer-arith -fpermissive `pkg-config --cflags raftlib` -I${PARSEC_INC}/openssl/include -DENABLE_BZIP2_COMPRESSION
+CXXFLAGS = -O0 -g -Wno-pointer-arith -fpermissive `pkg-config --cflags raftlib` -I${PARSEC_INC}/openssl/include -DENABLE_BZIP2_COMPRESSION
 LIB = `pkg-config --libs raftlib` -L${PARSEC_LIB}/openssl/lib -lssl -lcrypto -lbz2
 
 TARGET = dedup
