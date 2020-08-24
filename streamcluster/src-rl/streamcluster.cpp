@@ -113,7 +113,6 @@ void streamCluster( PStream* stream, long kmin, long kmax, int dim, long chunksi
   // Create the points and centers arrays
 
   Points points(chunksize /** n **/, dim /** dim **/, chunksize /** reserve **/);
-
   for( int i = 0; i < chunksize; i++ ) 
     points.p[i].coord = &block[i*dim];
 

@@ -76,8 +76,10 @@ LocalSearchStarter::LocalSearchStarter(Points* points, Points* centers, unsigned
     input.addPort<PStreamReader_Output>("input");
 
     // Create our output ports based on the number of desired threads
-    for (unsigned int i = 0; i < m_ThreadCount; i++)
-        output.addPort<LocalSearchStarter_Output>(std::to_string(i).c_str());
+    for (unsigned int i = 0; i < m_ThreadCount; i++) {
+        const auto val = std::to_string(i);
+        output.addPort<LocalSearchStarter_Output>(val);
+    }
 }
 
 raft::kstatus LocalSearchStarter::run()
@@ -111,10 +113,11 @@ raft::kstatus LocalSearchStarter::run()
     // Push our result to LocalSearchStarter
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
+        const auto val = std::to_string(i);
         if (inputData.useCenters)
-            output[std::to_string(i).c_str()].push<LocalSearchStarter_Output>(LocalSearchStarter_Output(m_Centers, m_Centers->num, blockSize, i));
+            output[val].push<LocalSearchStarter_Output>(LocalSearchStarter_Output(m_Centers, m_Centers->num, blockSize, i));
         else
-            output[std::to_string(i).c_str()].push<LocalSearchStarter_Output>(LocalSearchStarter_Output(m_Points, inputData.numRead, blockSize, i));
+            output[val].push<LocalSearchStarter_Output>(LocalSearchStarter_Output(m_Points, inputData.numRead, blockSize, i));
     }
         
     // Cleanup
@@ -165,8 +168,10 @@ PKMedianAccumulator1::PKMedianAccumulator1(long kmin, long kmax, long* kFinal, u
     : raft::kernel_all(), m_kMin(kmin), m_kMax(kmax), m_kFinal(kFinal), m_ThreadCount(threadCount)
 {
     // Create our input ports based on the number of desired threads
-    for (unsigned int i = 0; i < m_ThreadCount; i++)
-        input.addPort<PKMedianWorker_Output>(std::to_string(i).c_str());
+    for (unsigned int i = 0; i < m_ThreadCount; i++) {
+        const auto val = std::to_string(i);
+        input.addPort<PKMedianWorker_Output>(val);
+    }
 
     // PSpeedyCallManager Output
     output.addPort<PSpeedyCallManager_Input>("output_pspeedy");
@@ -188,11 +193,12 @@ raft::kstatus PKMedianAccumulator1::run()
     // Read the input data
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
-        PKMedianWorker_Output inputData = input[std::to_string(i).c_str()].peek<PKMedianWorker_Output>();
+        const auto val = std::to_string(i);
+        PKMedianWorker_Output inputData = input[val].peek<PKMedianWorker_Output>();
         numRead = inputData.numRead;
         points = inputData.points;
         *hiz += inputData.hiz;
-        input[std::to_string(i).c_str()].recycle();
+        input[val].recycle();
     }
 
     // Initialize the value of z
@@ -257,8 +263,10 @@ raft::kstatus PSpeedyCallManager::run()
     PSpeedyWorkerConsumer consumer1(&totalCost, m_ThreadCount);
     raft::map m1;
 
-    for (unsigned int i = 0; i < m_ThreadCount; i++)
-        m1 += producer1[std::to_string(i).c_str()] >> workers1[i] >> consumer1[std::to_string(i).c_str()];
+    for (unsigned int i = 0; i < m_ThreadCount; i++) {
+        const auto val = std::to_string(i);
+        m1 += producer1[val] >> workers1[i] >> consumer1[val];
+    }
 
     m1.exe();
 
@@ -326,8 +334,10 @@ raft::kstatus PSpeedyCallManager::run()
                 PSpeedyWorkerConsumer consumer(&totalCost, m_ThreadCount);
                 raft::map m;
 
-                for (unsigned int i = 0; i < m_ThreadCount; i++)
-                    m += producer[std::to_string(i).c_str()] >> workers[i] >> consumer[std::to_string(i).c_str()];
+                for (unsigned int i = 0; i < m_ThreadCount; i++) {
+                    const auto val = std::to_string(i);
+                    m += producer[val] >> workers[i] >> consumer[val];
+                }
 
                 m.exe();
             //}       
@@ -352,16 +362,19 @@ PSpeedyWorkerProducer::PSpeedyWorkerProducer(Points* points, size_t numRead, boo
     : raft::kernel(), m_Points(points), m_NumRead(numRead), m_ThreadCount(threadCount), m_IterationIndex(iterationIndex), m_Work(work)
 {
     // Create our output ports for the workers
-    for (unsigned int i = 0; i < m_ThreadCount; i++)
-        output.addPort<PSpeedyWorker_Input>(std::to_string(i).c_str());
+    for (unsigned int i = 0; i < m_ThreadCount; i++) {
+        const auto val = std::to_string(i);
+        output.addPort<PSpeedyWorker_Input>(val);
+    }
 }
 
 raft::kstatus PSpeedyWorkerProducer::run()
 {
     // Command the worker kernels.
-    for (unsigned int i = 0; i < m_ThreadCount; i++)
-        output[std::to_string(i).c_str()].push<PSpeedyWorker_Input>(PSpeedyWorker_Input(m_Points, m_NumRead, i, m_NumRead/m_ThreadCount, m_IterationIndex, m_Work));
-
+    for (unsigned int i = 0; i < m_ThreadCount; i++) {
+        const auto val = std::to_string(i);
+        output[val].push<PSpeedyWorker_Input>(PSpeedyWorker_Input(m_Points, m_NumRead, i, m_NumRead/m_ThreadCount, m_IterationIndex, m_Work));
+    }
     return raft::stop;
 }
 
@@ -425,8 +438,10 @@ PSpeedyWorkerConsumer::PSpeedyWorkerConsumer(double* cost, unsigned int threadCo
     : raft::kernel_all(), m_Cost(cost), m_ThreadCount(threadCount)
 {
     // Create our input ports for the worker kernels.
-    for (unsigned int i = 0; i < m_ThreadCount; i++)
-        input.addPort<double>(std::to_string(i).c_str());
+    for (unsigned int i = 0; i < m_ThreadCount; i++) {
+        const auto val = std::to_string(i);
+        input.addPort<double>(val);
+    }
 }
 
 raft::kstatus PSpeedyWorkerConsumer::run()
@@ -435,8 +450,9 @@ raft::kstatus PSpeedyWorkerConsumer::run()
     *m_Cost = 0.0;
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
-        *m_Cost += input[std::to_string(i).c_str()].peek<double>();
-        input[std::to_string(i).c_str()].recycle();
+        const auto val = std::to_string(i);
+        *m_Cost += input[val].peek<double>();
+        input[val].recycle();
     }
 
     return raft::proceed;
@@ -539,7 +555,8 @@ PGainCallManager::PGainCallManager(unsigned int CACHE_LINE, unsigned int threadC
     // Create our output ports for the worker kernels.
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
-        output.addPort<PGainWorker1_IO>(std::to_string(i).c_str());
+        const auto val = std::to_string(i);
+        output.addPort<PGainWorker1_IO>(val);
     }
 }
 
@@ -555,9 +572,10 @@ raft::kstatus PGainCallManager::run()
     double* work_mem = new double[stride * (m_ThreadCount + 1)];
 
     // Push our output
-    for (unsigned int i = 0; i < m_ThreadCount; i++)
-        output[std::to_string(i).c_str()].push<PGainWorker1_IO>(PGainWorker1_IO(m_InputData.points, m_InputData.numRead, m_InputData.z, m_InputData.kCenter, m_InputData.cost, m_InputData.numFeasible, stride, m_CL, work_mem, i, m_InputData.numRead / m_ThreadCount + 1, m_InputData.x));
-
+    for (unsigned int i = 0; i < m_ThreadCount; i++) {
+        const auto val = std::to_string(i);
+        output[val].push<PGainWorker1_IO>(PGainWorker1_IO(m_InputData.points, m_InputData.numRead, m_InputData.z, m_InputData.kCenter, m_InputData.cost, m_InputData.numFeasible, stride, m_CL, work_mem, i, m_InputData.numRead / m_ThreadCount + 1, m_InputData.x));
+    }
     return raft::stop;
 }
 
@@ -600,10 +618,11 @@ PGainAccumulator1::PGainAccumulator1(unsigned int threadCount)
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         // Input from the worker threads
-        input.addPort<PGainWorker1_IO>(std::to_string(i).c_str());
+        const auto val = std::to_string(i);
+        input.addPort<PGainWorker1_IO>(val);
 
         // The output will command the worker threads
-        output.addPort<PGainWorker1_IO>(std::to_string(i).c_str());
+        output.addPort<PGainWorker1_IO>(val);
     }
 }
 
@@ -614,7 +633,8 @@ raft::kstatus PGainAccumulator1::run()
 
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
-        PGainWorker1_IO inputData = input[std::to_string(i).c_str()].peek<PGainWorker1_IO>();
+        const auto val = std::to_string(i);
+        PGainWorker1_IO inputData = input[val].peek<PGainWorker1_IO>();
         work_mem = inputData.work_mem;
         stride = inputData.stride;
     }
@@ -630,9 +650,10 @@ raft::kstatus PGainAccumulator1::run()
 
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
-        PGainWorker1_IO inputData = input[std::to_string(i).c_str()].peek<PGainWorker1_IO>();
-        output[std::to_string(i).c_str()].push<PGainWorker1_IO>(inputData);
-        input[std::to_string(i).c_str()].recycle();
+        const auto val = std::to_string(i);
+        PGainWorker1_IO inputData = input[val].peek<PGainWorker1_IO>();
+        output[val].push<PGainWorker1_IO>(inputData);
+        input[val].recycle();
     }
 
     return raft::proceed;
@@ -675,11 +696,12 @@ PGainAccumulator2::PGainAccumulator2(unsigned int threadCount)
 {
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
+        const auto val = std::to_string(i);
         // Input from the worker threads
-        input.addPort<PGainWorker1_IO>(std::to_string(i).c_str());
+        input.addPort<PGainWorker1_IO>(val);
 
         // The output will command the worker threads
-        output.addPort<PGainWorker1_IO>(std::to_string(i).c_str());
+        output.addPort<PGainWorker1_IO>(val);
     }
 }
 
@@ -690,7 +712,8 @@ raft::kstatus PGainAccumulator2::run()
 
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
-        PGainWorker1_IO inputData = input[std::to_string(i).c_str()].peek<PGainWorker1_IO>();
+        const auto val = std::to_string(i);
+        PGainWorker1_IO inputData = input[val].peek<PGainWorker1_IO>();
         work_mem = inputData.work_mem;
         stride = inputData.stride;
     }
@@ -699,9 +722,10 @@ raft::kstatus PGainAccumulator2::run()
 
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
-        PGainWorker1_IO inputData = input[std::to_string(i).c_str()].peek<PGainWorker1_IO>();
-        output[std::to_string(i).c_str()].push<PGainWorker1_IO>(inputData);
-        input[std::to_string(i).c_str()].recycle();
+        const auto val = std::to_string(i);
+        PGainWorker1_IO inputData = input[val].peek<PGainWorker1_IO>();
+        output[val].push<PGainWorker1_IO>(inputData);
+        input[val].recycle();
     }
 
     return raft::proceed;
@@ -768,11 +792,12 @@ PGainAccumulator3::PGainAccumulator3(unsigned int threadCount)
 {
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
+        const auto val = std::to_string(i);
         // Input from the worker threads
-        input.addPort<PGainWorker3_Output>(std::to_string(i).c_str());
+        input.addPort<PGainWorker3_Output>(val);
 
         // The output will command the worker threads
-        output.addPort<PGainWorker3_Output>(std::to_string(i).c_str());
+        output.addPort<PGainWorker3_Output>(val);
     }
 }
 
@@ -781,9 +806,10 @@ raft::kstatus PGainAccumulator3::run()
     // This kernel actually does no work, but serves as a barrier so that the kernels remained synchronized.
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
-        PGainWorker3_Output inputData = input[std::to_string(i).c_str()].peek<PGainWorker3_Output>();
-        output[std::to_string(i).c_str()].push<PGainWorker3_Output>(inputData);
-        input[std::to_string(i).c_str()].recycle();
+        const auto val = std::to_string(i);
+        PGainWorker3_Output inputData = input[val].peek<PGainWorker3_Output>();
+        output[val].push<PGainWorker3_Output>(inputData);
+        input[val].recycle();
     }
 
     return raft::proceed;
@@ -845,11 +871,12 @@ PGainAccumulator4::PGainAccumulator4(unsigned int threadCount)
 {
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
+        const auto val = std::to_string(i);
         // Input from the worker threads
-        input.addPort<PGainWorker4_Output>(std::to_string(i).c_str());
+        input.addPort<PGainWorker4_Output>(val);
 
         // The output will command the worker threads
-        output.addPort<PGainWorker4_Output>(std::to_string(i).c_str());
+        output.addPort<PGainWorker4_Output>(val);
     }
 }
 
@@ -860,16 +887,18 @@ raft::kstatus PGainAccumulator4::run()
 
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
-        PGainWorker4_Output inputData = input[std::to_string(i).c_str()].peek<PGainWorker4_Output>();
+        const auto val = std::to_string(i);
+        PGainWorker4_Output inputData = input[val].peek<PGainWorker4_Output>();
         gl_number_of_centers_to_close += inputData.number_of_centers_to_close;
         gl_cost_of_opening_x += inputData.cost_of_opening_x;
     }
 
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
-        PGainWorker4_Output inputData = input[std::to_string(i).c_str()].peek<PGainWorker4_Output>();
-        output[std::to_string(i).c_str()].push<PGainWorker4_Output>(PGainWorker4_Output(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, inputData.cost, inputData.numFeasible, inputData.stride, inputData.cl, inputData.work_mem, inputData.tid, inputData.blockSize, inputData.x, inputData.lower, inputData.gl_lower, gl_cost_of_opening_x, gl_number_of_centers_to_close));
-        input[std::to_string(i).c_str()].recycle();
+        const auto val = std::to_string(i);
+        PGainWorker4_Output inputData = input[val].peek<PGainWorker4_Output>();
+        output[val].push<PGainWorker4_Output>(PGainWorker4_Output(inputData.points, inputData.numRead, inputData.z, inputData.kCenter, inputData.cost, inputData.numFeasible, inputData.stride, inputData.cl, inputData.work_mem, inputData.tid, inputData.blockSize, inputData.x, inputData.lower, inputData.gl_lower, gl_cost_of_opening_x, gl_number_of_centers_to_close));
+        input[val].recycle();
     }
 
     return raft::proceed;
@@ -929,7 +958,8 @@ PGainAccumulator5::PGainAccumulator5(double* result, unsigned int threadCount)
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
         // Input from the worker threads
-        input.addPort<PGainWorker4_Output>(std::to_string(i).c_str());
+        const auto val = std::to_string(i);
+        input.addPort<PGainWorker4_Output>(val);
     }
 }
 
@@ -942,7 +972,8 @@ raft::kstatus PGainAccumulator5::run()
 
     for (unsigned int i = 0; i < m_ThreadCount; i++)
     {
-        PGainWorker4_Output inputData = input[std::to_string(i).c_str()].peek<PGainWorker4_Output>();
+        const auto val = std::to_string(i);
+        PGainWorker4_Output inputData = input[val].peek<PGainWorker4_Output>();
         kCenter = inputData.kCenter;
         gl_number_of_centers_to_close = inputData.number_of_centers_to_close;
         gl_cost_of_opening_x = inputData.cost_of_opening_x;
@@ -960,8 +991,10 @@ raft::kstatus PGainAccumulator5::run()
 
     delete[] work_mem;
 
-    for (unsigned int i = 0; i < m_ThreadCount; i++)
-        input[std::to_string(i).c_str()].recycle();
+    for (unsigned int i = 0; i < m_ThreadCount; i++) {
+        const auto val = std::to_string(i);
+        input[val].recycle();
+    }
 
     // This is the return value of pgain
     *m_Result = -gl_cost_of_opening_x;
@@ -1013,7 +1046,7 @@ raft::kstatus PFLCallManager::run()
             // Worker connections
             for (unsigned int i = 0; i < m_ThreadCount; i++)
             {
-                const char* val = std::to_string(i).c_str();
+                const auto val = std::to_string(i);
                 worker1s[i] = new PGainWorker1(m_IsCenter, m_CenterTable);
                 m += manager[val] >> *(worker1s[i]) >> accum1[val];
                 worker2s[i] = new PGainWorker2(m_IsCenter, m_CenterTable, m_SwitchMembership);
