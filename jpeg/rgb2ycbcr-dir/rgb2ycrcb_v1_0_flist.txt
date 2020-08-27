@@ -1,0 +1,8 @@
+# Output products list for <rgb2ycrcb_v1_0>
+rgb2ycrcb_v1_0.ngc
+rgb2ycrcb_v1_0.vhd
+rgb2ycrcb_v1_0.vho
+rgb2ycrcb_v1_0.xco
+rgb2ycrcb_v1_0_flist.txt
+rgb2ycrcb_v1_0_rgb2ycrcb_v1_0_xst_1.ngc_xst.xrpt
+rgb2ycrcb_v1_0_xmdf.tcl

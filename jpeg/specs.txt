@@ -1,0 +1,14 @@
+128 128
+2
+0 dc_luminance_bits.txt dc_luminance_huffvals.txt
+1 dc_chrominance_bits.txt dc_chrominance_huffvals.txt
+2
+0 ac_luminance_bits.txt ac_luminance_huffvals.txt
+1 ac_chrominance_bits.txt ac_chrominance_huffvals.txt
+2
+0 q_luminance.txt
+1 q_chrominance.txt
+3
+1 1 1 0 0 0 
+2 1 1 0 0 0
+3 1 1 0 0 0

@@ -1,0 +1,23 @@
+MAPPING 1: //everything on one processor
+   Everything on one processor
+Mapping 2: //four processors
+   GenColor //One Process
+   Y'CbCr //One Process
+   all JPEG pipelines //One Process
+   FileWrite //One Process
+Mapping 3: //Six Processors
+   Gen Color //One Process
+   Y'CbCr //One Proces
+   Each JPEG Pipeline //One Process so 3 Processes total
+   FileWrite //One Process
+Mapping 4: //12 Processors
+   GenColor //One Process
+   Y'CbCr //One Process
+   //Each of these will have one replication for each channel
+   {LevelShift,DCT2Array} //One process for each pipeline = 3 processes
+   {Quant,Dcc,Zigzag} //One process for each = 3 processes
+   {huff } One process for each = 3 processes
+   FileWrite = 1 process
+
+   //for each of these make sure you specify a unique cpunum so they'll each have their own processor.
+

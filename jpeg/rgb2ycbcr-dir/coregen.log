@@ -1,0 +1,14 @@
+Welcome to Xilinx CORE Generator.
+Wrote project file /home/mercury/beardj/apps/jpeg/rgb2ycbcr-dir/coregen.cgp.
+Customizing IP...
+Finished Customizing.
+Generating IP...
+WARNING:sim:216 - The chosen IP does not support a VHDL behavioral model,
+   generating a VHDL structural model instead. Exception (null) getting Customizer GUI for component
+(com.xilinx.ip.rgb2ycrcb_v1_0.rgb2ycrcb_v1_0)
+Generating Implementation files.
+Generating NGC file.
+Generating VHDL structural model.
+Finished Generating.
+Successfully generated rgb2ycrcb_v1_0.
+Closed project file.

@@ -1,0 +1,60 @@
+##############################################################
+#
+# Xilinx Core Generator version K.39
+# Date: Wed Jan 11 17:41:39 2012
+#
+##############################################################
+#
+#  This file contains the customisation parameters for a
+#  Xilinx CORE Generator IP GUI. It is strongly recommended
+#  that you do not manually alter this file as it may cause
+#  unexpected and unsupported behavior.
+#
+##############################################################
+#
+# BEGIN Project Options
+SET addpads = False
+SET asysymbol = False
+SET busformat = BusFormatParenNotRipped
+SET createndf = False
+SET designentry = VHDL
+SET device = xc4vlx100
+SET devicefamily = virtex4
+SET flowvendor = Synplicity
+SET formalverification = False
+SET foundationsym = False
+SET implementationfiletype = Ngc
+SET package = ff1148
+SET removerpms = False
+SET simulationfiles = Behavioral
+SET speedgrade = -10
+SET verilogsim = False
+SET vhdlsim = True
+# END Project Options
+# BEGIN Select
+SELECT RGB_to_YCrCb_Color-Space_Converter family Xilinx,_Inc. 1.0
+# END Select
+# BEGIN Parameters
+CSET c_d=0.5772
+CSET ca=0.2568
+CSET cb=0.0979
+CSET cc=0.591
+CSET cmax=255
+CSET cmin=0
+CSET coffset=128
+CSET component_name=rgb2ycrcb_v1_0
+CSET cwidth=17
+CSET has_clamp=true
+CSET has_clip=true
+CSET iwidth=8
+CSET mwidth=18
+CSET output_range=0_to_255_for_Computer_Graphics
+CSET owidth=8
+CSET standard_sel=SD_ITU_601
+CSET ymax=255
+CSET ymin=0
+CSET yoffset=0
+# END Parameters
+GENERATE
+# CRC: 7b948373
+

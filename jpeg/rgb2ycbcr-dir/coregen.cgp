@@ -1,0 +1,20 @@
+# Date: Wed Jan 11 17:39:39 2012
+SET addpads = False
+SET asysymbol = False
+SET busformat = BusFormatParenNotRipped
+SET createndf = False
+SET designentry = VHDL
+SET device = xc4vlx100
+SET devicefamily = virtex4
+SET flowvendor = Synplicity
+SET formalverification = False
+SET foundationsym = False
+SET implementationfiletype = Ngc
+SET package = ff1148
+SET removerpms = False
+SET simulationfiles = Behavioral
+SET speedgrade = -10
+SET verilogsim = False
+SET vhdlsim = True
+SET workingdirectory = /home/mercury/beardj/apps/jpeg/rgb2ycbcr-dir/tmp
+

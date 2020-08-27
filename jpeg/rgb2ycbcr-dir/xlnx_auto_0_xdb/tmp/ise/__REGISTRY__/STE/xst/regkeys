@@ -1,0 +1,6 @@
+CommandLine
+/syssoft/fpga_tools/xilinx/10/ISE/bin/lin64/unwrapped/xst -ifn tmp/_cg/_bbx/rgb2ycrcb_v1_0_rgb2ycrcb_v1_0_xst_1.scr -ofn tmp/_cg/_bbx/rgb2ycrcb_v1_0_rgb2ycrcb_v1_0_xst_1_xst.log -intstyle silent -finalclean 1
+s
+FormatString
+xst [-ifn <InputFile>] [-ofn <OutputFile>] [-ise <iseProjectFile>] [--quiet] [-intstyle <Style>] [--deb <DebugLevel>] [--finalclean <Clean>] [--PcubeFlow] [--globOptFlow] [--XstNtrc]
+s
