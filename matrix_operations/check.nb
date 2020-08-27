@@ -1,0 +1,84 @@
+(* Content-type: application/vnd.wolfram.mathematica *)
+
+(*** Wolfram Notebook File ***)
+(* http://www.wolfram.com/nb *)
+
+(* CreatedBy='Mathematica 9.0' *)
+
+(*CacheID: 234*)
+(* Internal cache information:
+NotebookFileLineBreakTest
+NotebookFileLineBreakTest
+NotebookDataPosition[       157,          7]
+NotebookDataLength[      2083,         75]
+NotebookOptionsPosition[      1649,         55]
+NotebookOutlinePosition[      2006,         71]
+CellTagsIndexPosition[      1963,         68]
+WindowFrame->Normal*)
+
+(* Beginning of Notebook Content *)
+Notebook[{
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"SetDirectory", "[", 
+   RowBox[{"NotebookDirectory", "[", "]"}], "]"}], ";"}]], "Input",
+ CellChangeTimes->{{3.6222036294870167`*^9, 3.62220363743567*^9}}],
+
+Cell[BoxData[{
+ RowBox[{
+  RowBox[{"arr", " ", "=", " ", 
+   RowBox[{"Import", "[", "\"\<intmatrix100_100.csv\>\"", "]"}]}], 
+  ";"}], "\[IndentingNewLine]", 
+ RowBox[{
+  RowBox[{"myarr", " ", "=", " ", 
+   RowBox[{
+   "Import", "[", "\"\</project/mercury/svardata/temp.csv\>\"", "]"}]}], 
+  ";"}]}], "Input",
+ CellChangeTimes->{{3.6119212080131607`*^9, 3.611921216624157*^9}, {
+  3.622203639520986*^9, 3.622203678065279*^9}}],
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"answer", " ", "=", " ", 
+   RowBox[{"arr", " ", "\[Times]", " ", "arr"}]}], ";"}]], "Input",
+ CellChangeTimes->{{3.6222036423280373`*^9, 3.6222036943629827`*^9}}],
+
+Cell[CellGroupData[{
+
+Cell[BoxData[
+ RowBox[{"myarr", "\[Equal]", "answer"}]], "Input",
+ CellChangeTimes->{{3.622203681822043*^9, 3.622203687065865*^9}}],
+
+Cell[BoxData["False"], "Output",
+ CellChangeTimes->{{3.622203682922042*^9, 3.622203696000916*^9}}]
+}, Open  ]]
+},
+WindowSize->{740, 756},
+WindowMargins->{{Automatic, 387}, {70, Automatic}},
+FrontEndVersion->"9.0 for Mac OS X x86 (32-bit, 64-bit Kernel) (January 25, \
+2013)",
+StyleDefinitions->"Default.nb"
+]
+(* End of Notebook Content *)
+
+(* Internal cache information *)
+(*CellTagsOutline
+CellTagsIndex->{}
+*)
+(*CellTagsIndex
+CellTagsIndex->{}
+*)
+(*NotebookFileOutline
+Notebook[{
+Cell[557, 20, 190, 4, 28, "Input"],
+Cell[750, 26, 426, 11, 46, "Input"],
+Cell[1179, 39, 197, 4, 28, "Input"],
+Cell[CellGroupData[{
+Cell[1401, 47, 131, 2, 28, "Input"],
+Cell[1535, 51, 98, 1, 28, "Output"]
+}, Open  ]]
+}
+]
+*)
+
+(* End of internal cache information *)
