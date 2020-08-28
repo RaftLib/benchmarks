@@ -154,6 +154,7 @@ template< typename T > struct matrix{
    {
       for( size_t row_index( 0 ); row_index < height; row_index++ )
       {
+         stream << "\t";
          for( size_t column_index( 0 ); column_index < width; column_index++ )
          {
             stream << data_matrix[ ( row_index * width ) + column_index ];
@@ -206,7 +207,10 @@ template< typename T > struct matrix{
    }
 
    
+     
+
    T *data_matrix;
+   
    size_t height;
    size_t width;
 };

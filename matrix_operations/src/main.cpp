@@ -42,6 +42,11 @@ int main( int argc, char **argv )
     cmdargs.addOption( new Option< std::string >( filename, 
                                                   "-f",
                                                   "filename with matrix, will always be MxM" ) );
+    bool print_matrices( false );
+    cmdargs.addOption( new Option< bool >( print_matrices,
+                                           "-pmatrix",
+                                           "print the input matrices" ) );
+    
     /** process args **/
     cmdargs.processArgs( argc, argv );
     if( help || ! cmdargs.allMandatorySet() )
@@ -51,8 +56,13 @@ int main( int argc, char **argv )
     }
     
     auto *A( matrix< thetype_t >::initFromFile( filename ) );
+    auto *B( matrix< thetype_t >::initFromFile( filename ) );
     //actual app goes here
-
+    if( print_matrices )
+    {
+        A->print( std::cout, Format::SPACE ) << "\n\tx\n\n";
+        B->print( std::cout, Format::SPACE ) << "\n";
+    }
     
     delete( A );
     return( EXIT_SUCCESS );       
