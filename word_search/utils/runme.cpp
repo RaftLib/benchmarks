@@ -2,6 +2,9 @@
 #include <cstdlib>
 #include <unistd.h>
 #include <cmd>
+#include <climits>
+#include <cassert>
+#include <sstream>
 
 int main( int argc, char **argv, char **envp )
 {
@@ -41,10 +44,43 @@ int main( int argc, char **argv, char **envp )
         exit( EXIT_SUCCESS );
     }
    
+    std::vector< const char* >  args_new;
+    args_new.push_back( appname.c_str() );
+    if( arguments.compare( "none" ) != 0 )
+    {
+        args_new.push_back( arguments.c_str() );
+    }
+    args_new.push_back( nullptr );
+    args_new.shrink_to_fit();
+
+
+    auto *cwd( getcwd( nullptr, 0 ) );
+    assert( cwd != nullptr );
+    std::stringstream ss;
+    ss << cwd << "/" << appname;
+    //FIXME, we should check to make sure the file exists. 
     
-    const char * const args[] = { "foobar" , nullptr };
+    std::vector< const char* >  envp_new;
+
+    while( *envp != nullptr )
+    {
+        
+        envp_new.push_back( *envp );
+        envp++;
+    }
+    if( envparams.compare( "none" ) != 0 )
+    {
+        envparams.shrink_to_fit();
+        envp_new.push_back( envparams.c_str() );
+    }
+    envp_new.push_back( nullptr );
+    envp_new.shrink_to_fit();
+
+    envp = nullptr;
 
     //now run app
-    execve( appname.c_str(), args, envp );
+    execve( ss.str().c_str(), 
+            const_cast< char * const *>( args_new.data() ), 
+            const_cast< char * const *>( envp_new.data() ) );
     return( EXIT_SUCCESS );
 }

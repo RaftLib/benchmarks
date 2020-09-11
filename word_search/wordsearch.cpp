@@ -47,7 +47,7 @@ public:
 
    virtual ~search() = default;
 
-   virtual raft::kstatus run()
+   virtual raft::kstatus run() override
    {
       auto &chunk( input[ "0" ].template peek< T >() );
       auto it( chunk.begin() );
@@ -78,7 +78,8 @@ private:
 int
 main( int argc, char **argv )
 {
-    using chunk = raft::filechunk< 256 >;
+    using chunk = raft::filechunk< 48 /** 48B data, 12B meta == 60B payload **/ >;
+    std::cerr << "chunk size: " << sizeof( chunk ) << "\n";
     using fr    = raft::filereader< chunk, false >;
     using search = search< chunk >;
     using print = raft::print< std::size_t, '\n'>;
