@@ -25,6 +25,7 @@
 #include <string>
 #include <iterator>
 #include <algorithm>
+#include <chrono> 
 
 template < class T > class search : public raft::kernel
 {
@@ -102,7 +103,13 @@ main( int argc, char **argv )
                 raft::kernel::make< search >( term ) >> p[ std::to_string( i ) ];
     }
 
-    //m.exe< partition_dummy, pool_schedule, vlalloc, no_parallel >();
+    std::cerr << "starting time\n";
+    const auto start( std::chrono::high_resolution_clock::now() );
     m.exe< partition_dummy, pool_schedule, stdalloc, no_parallel >();
+    const auto end( std::chrono::high_resolution_clock::now() );
+    std::cerr << "ending time\n";
+    const std::chrono::duration<double> total = end - start;
+    //std::chrono::duration_cast< std::chrono::seconds >(  end - start );
+    std::cerr << "region of interest timing: (" << total.count() << ") s\n";
     return( EXIT_SUCCESS );
 }
