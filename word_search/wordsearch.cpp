@@ -225,7 +225,8 @@ main( int argc, char **argv )
 
     //start timing
     const auto start( std::chrono::high_resolution_clock::now() );
-    m.exe< partition_dummy, simple_schedule, stdalloc, no_parallel >();
+    //m.exe< partition_dummy, simple_schedule, stdalloc, no_parallel >();
+    m.exe< partition_dummy, pool_schedule, stdalloc, no_parallel >();
     const auto end( std::chrono::high_resolution_clock::now() );
     ////end timing 
 
