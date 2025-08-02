@@ -34,7 +34,7 @@ papers and information is available [here](https://parsec.cs.princeton.edu)
 * stringmatch
     * not sure if this is the best benchmark given
     it almost always ends up being RAM speed limited
-    in the RL case vs. coompute limited...but, maybe
+    in the RL case vs. compute limited...but, maybe
     not a bad idea to add. 
 
 
